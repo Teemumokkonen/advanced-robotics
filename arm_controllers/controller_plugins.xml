@@ -35,5 +35,11 @@
       Passivity Based Controller
     </description>
   </class>
+
+  <class name="arm_controllers/ComputedVelocityController" type="arm_controllers::ComputedVelocityController" base_class_type="controller_interface::ControllerBase">
+    <description>
+      velocity Based Controller
+    </description>
+  </class>
 </library>
 
