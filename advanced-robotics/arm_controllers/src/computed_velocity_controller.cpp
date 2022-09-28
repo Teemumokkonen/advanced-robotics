@@ -270,7 +270,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         // ********* 0. Get states from gazebo *********
         // 0.1 sampling time
         double dt = period.toSec();
-        t = t + 0.001;
+        t = t + dt;
         // 0.2 joint state feedback from the model
         for (int i = 0; i < n_joints_; i++)
         {
@@ -309,7 +309,8 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         }
         else {  
             // kinematic control command in the Task space
-
+            fk_pos_solver_->JntToCart(q_, x_); // end effector poss 
+            jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
             if (frame_error_ == true) 
             {
                 Xerr_ = diff(x_, xd_); // error from the frame
@@ -319,8 +320,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
                 Xerr_.vel = diff(x_.p, xd_.p);
             }
 
-            fk_pos_solver_->JntToCart(q_, x_); // end effector poss 
-            jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
+    
             J_inv_.data = J_.data.inverse(); // inverse of the jacobian 
             Vcmd_ = Vd_ + 1.0*Xerr_;
             for (size_t i = 0; i < n_joints_; i++) {
@@ -350,10 +350,56 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         {
             joints_[i].setCommand(tau_d_(i)); 
         }
+
+        print_state();
     }
 
     void stopping(const ros::Time &time)
     {
+    }
+
+    void print_state()
+    {
+        static int count = 0;
+        if (count > 99)
+        {
+            printf("*********************************************************\n\n");
+            printf("*** Simulation Time (unit: sec)  ***\n");
+            printf("t = %f\n", t);
+            printf("\n");
+
+            printf("*** Desired State in Joint Space (unit: deg) ***\n");
+            printf("qd_(0): %f, ", qd_(0)*R2D);
+            printf("qd_(1): %f, ", qd_(1)*R2D);
+            printf("qd_(2): %f, ", qd_(2)*R2D);
+            printf("qd_(3): %f, ", qd_(3)*R2D);
+            printf("qd_(4): %f, ", qd_(4)*R2D);
+            printf("qd_(5): %f\n", qd_(5)*R2D);
+            printf("\n");
+
+            printf("*** Actual State in Joint Space (unit: deg) ***\n");
+            printf("q_(0): %f, ", q_(0) * R2D);
+            printf("q_(1): %f, ", q_(1) * R2D);
+            printf("q_(2): %f, ", q_(2) * R2D);
+            printf("q_(3): %f, ", q_(3) * R2D);
+            printf("q_(4): %f, ", q_(4) * R2D);
+            printf("q_(5): %f\n", q_(5) * R2D);
+            printf("\n");
+
+
+            printf("*** Joint Space Error (unit: deg)  ***\n");
+            printf("%f, ", R2D * e_(0));
+            printf("%f, ", R2D * e_(1));
+            printf("%f, ", R2D * e_(2));
+            printf("%f, ", R2D * e_(3));
+            printf("%f, ", R2D * e_(4));
+            printf("%f\n", R2D * e_(5));
+            printf("\n");
+
+
+            count = 0;
+        }
+        count++;
     }
 
   private:
