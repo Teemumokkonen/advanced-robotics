@@ -1,0 +1,11 @@
+#goal route definations
+float32[] qd
+float32[] qd_dot
+float32[] qd_ddot
+---
+#result definition
+bool pose_reached
+---
+#feedback
+float32[] q
+float32[] q_err

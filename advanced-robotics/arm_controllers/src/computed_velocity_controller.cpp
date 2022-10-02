@@ -11,19 +11,25 @@
 #include <kdl/tree.hpp>
 #include <kdl/kdl.hpp>
 #include <kdl/chain.hpp>
-#include <Eigen/Core>
-#include <Eigen/Geometry>
-#include <eigen_conversions/eigen_kdl.h>
 #include <kdl/frames.hpp>
 #include <kdl_parser/kdl_parser.hpp>
 #include <kdl/chaindynparam.hpp>              // inverse dynamics
 #include <kdl/chainjnttojacsolver.hpp> 
 #include <kdl/chainfksolverpos_recursive.hpp>
-#include <boost/scoped_ptr.hpp>
-#include <boost/lexical_cast.hpp>
-#include <Eigen/LU>
+
 #include <utils/pseudo_inversion.h>
 #include <utils/skew_symmetric.h>
+
+#include <Eigen/Core>
+#include <Eigen/Geometry>
+#include <eigen_conversions/eigen_kdl.h>
+#include <Eigen/LU>
+
+#include <boost/scoped_ptr.hpp>
+#include <boost/lexical_cast.hpp>
+
+#include <actionlib/server/simple_action_server.h>
+#include <command_msgs/planAction.h>
 
 #define A 0.1
 #define PI 3.141592
@@ -34,11 +40,123 @@
 #define b 2.5
 #define f 1
 
+class CommandServer {
+    public:
+        // Initialize action server (Node handle, action name, action callback function)
+        CommandServer(std::string name, unsigned int n_joints) :
+            as_(nh_, name, boost::bind(&CommandServer::executeCB, this, _1), false),
+            action_name_(name),
+            n_joints_ (n_joints)
+        {
+            command_slot_ = 0;
+            qd_.data = Eigen::VectorXd::Zero(n_joints_);
+            qd_dot_.data = Eigen::VectorXd::Zero(n_joints_);
+            qd_ddot_.data = Eigen::VectorXd::Zero(n_joints_);
+            as_.start();
+
+        }
+
+        ~CommandServer(void)
+        {
+        }
+
+        void executeCB(const command_msgs::planGoalConstPtr &goal) {
+            ROS_INFO("Got request from the client");
+            commands_qd.clear();
+            commands_qd_dot.clear();
+            commands_qd_ddot.clear();
+            command_slot_ = 0;
+            int command_flow = 0;
+
+            for (int i = 0; i < goal->qd.size() - 1; i++) {
+                qd_(command_flow) = goal->qd.at(i);
+                qd_dot_(command_flow) = goal->qd_dot.at(i);
+                qd_ddot_(command_flow) = goal->qd_ddot.at(i);
+                if (command_flow == n_joints_ - 1) {
+                    commands_qd.push_back(qd_);
+                    commands_qd_dot.push_back(qd_dot_);
+                    commands_qd_ddot.push_back(qd_ddot_);
+                    command_flow = 0;
+                    //printf("qd_(0): %f, ", qd_(0)*R2D);
+                    //printf("qd_(1): %f, ", qd_(1)*R2D);
+                    //printf("qd_(2): %f, ", qd_(2)*R2D);
+                    //printf("qd_(3): %f, ", qd_(3)*R2D);
+                    //printf("qd_(4): %f, ", qd_(4)*R2D);
+                    //printf("qd_(5): %f\n", qd_(5)*R2D);
+                }
+                else {
+                    command_flow++;
+                }
+            }
+            ROS_INFO("Request has been parsed, plan has been set");
+            result_.pose_reached = true;
+            as_.setSucceeded(result_);
+        }
+
+        KDL::JntArray get_pos() {
+            KDL::JntArray qd;
+            if (command_slot_ < commands_qd.size()) {
+                qd = commands_qd.at(command_slot_);
+                
+            }
+
+            else {
+                qd.data = Eigen::VectorXd::Zero(n_joints_);
+
+            }
+            return qd;
+        }
+
+        KDL::JntArray get_vel() {
+            KDL::JntArray qd_dot;
+            if (command_slot_ < commands_qd.size()) {
+                qd_dot = commands_qd_dot.at(command_slot_);
+                
+            }
+
+            else {
+                qd_dot.data = Eigen::VectorXd::Zero(n_joints_);
+
+            }
+            return qd_dot;
+        }
+
+        KDL::JntArray get_acc() {
+            KDL::JntArray qd_ddot;
+            if (command_slot_ < commands_qd.size()) {
+                qd_ddot = commands_qd_dot.at(command_slot_);
+                
+                command_slot_++;
+            }
+
+            else {
+                qd_ddot.data = Eigen::VectorXd::Zero(n_joints_);
+
+            }
+            return qd_ddot;
+        }
+
+    protected:
+        ros::NodeHandle nh_;
+        actionlib::SimpleActionServer<command_msgs::planAction> as_;
+        command_msgs::planFeedback feedback_;
+        command_msgs::planResult result_;
+        std::string action_name_; 
+
+    private:
+        int command_slot_;
+        unsigned int n_joints_;         
+        std::vector<float> trajectory;
+        KDL::JntArray qd_, qd_dot_, qd_ddot_;
+        std::vector<KDL::JntArray> commands_qd, commands_qd_dot, commands_qd_ddot;
+};
+
 namespace arm_controllers
 {
 class ComputedVelocityController : public controller_interface::Controller<hardware_interface::EffortJointInterface>
 {
   public:
+  
        bool init(hardware_interface::EffortJointInterface *hw, ros::NodeHandle &n)
     {
         // ********* 1. Get joint name / gain from the parameter server *********
@@ -245,8 +363,9 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
 
         pub_SaveData_ = n.advertise<std_msgs::Float64MultiArray>("SaveData", 1000); // 뒤에 숫자는?
 
-        // 6.2 subsriber
+        // 6.2 action server
 
+        cs_ = new CommandServer("plan/elfin", n_joints_);
         return true;
     }
 
@@ -280,15 +399,16 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
 
         // ********* 1. Desired Trajectory in Joint Space *********
 
-        for (size_t i = 0; i < n_joints_; i++)
-        {
-            qd_ddot_(i) = -M_PI * M_PI / 4 * 45 * KDL::deg2rad * sin(M_PI / 2 * t); // desired acceleration for the controller
-            qd_dot_(i) = M_PI / 2 * 45 * KDL::deg2rad * cos(M_PI / 2 * t); // this value is the desired velocity to match with the controller
-            qd_(i) = 45 * KDL::deg2rad * sin(M_PI / 2* t); // desired position for each joint
-        }
-
+        //for (size_t i = 0; i < n_joints_; i++)
+        //{
+        //    qd_ddot_(i) = -M_PI * M_PI / 4 * 45 * KDL::deg2rad * sin(M_PI / 2 * t); // desired acceleration for the controller
+        //    qd_dot_(i) = M_PI / 2 * 45 * KDL::deg2rad * cos(M_PI / 2 * t); // this value is the desired velocity to match with the controller
+        //    qd_(i) = 45 * KDL::deg2rad * sin(M_PI / 2* t); // desired position for each joint
+        //}
+        qd_ = cs_->get_pos();
+        qd_dot_ = cs_->get_vel();
+        qd_ddot_ = cs_->get_acc();
         // ********* 1. Desired Trajectory in Task space *********
-
         if (joint_space_ == false)
         {
             fk_pos_solver_->JntToCart(qd_, xd_); // desired end effector pos
@@ -351,7 +471,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
             joints_[i].setCommand(tau_d_(i)); 
         }
 
-        print_state();
+        //print_state();
     }
 
     void stopping(const ros::Time &time)
@@ -471,6 +591,9 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
     // params for using different controller types and calculations
     bool joint_space_;
     bool frame_error_;
+
+    CommandServer* cs_;
+
 };
 }; // namespace arm_controllers
 PLUGINLIB_EXPORT_CLASS(arm_controllers::ComputedVelocityController, controller_interface::ControllerBase)

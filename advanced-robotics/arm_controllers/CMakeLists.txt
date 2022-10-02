@@ -10,6 +10,9 @@ find_package(catkin REQUIRED COMPONENTS
   realtime_tools
   dynamic_reconfigure
   tf
+  actionlib
+  actionlib_msgs
+  command_msgs
 )
 
 # Dynamics reconfigure
@@ -19,7 +22,13 @@ generate_dynamic_reconfigure_options(
 
 # message
 add_message_files(FILES ControllerJointState.msg)
-generate_messages(DEPENDENCIES std_msgs)
+
+#add_action_files(
+#  DIRECTORY action
+#  FILES plan.action
+#)
+
+generate_messages(DEPENDENCIES actionlib_msgs std_msgs)
 
 # include
 include_directories(include ${Boost_INCLUDE_DIR} ${catkin_INCLUDE_DIRS})
@@ -34,6 +43,9 @@ catkin_package(
     realtime_tools
     dynamic_reconfigure
     tf
+    actionlib
+    actionlib_msgs
+    command_msgs
   LIBRARIES ${PROJECT_NAME}
 )
 
