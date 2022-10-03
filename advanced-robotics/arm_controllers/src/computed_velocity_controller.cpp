@@ -420,11 +420,10 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         }
 
         // ********* 2.2 Kinematic controller *********
-
+        e_.data = qd_.data - q_.data; // error for the joint states 
         if (joint_space_ == true)
         {      
             // kinematic control command in joint space
-            e_.data = qd_.data - q_.data; // error for the joint states 
             q_dot_cmd_.data = qd_dot_.data + Kp_.data.cwiseProduct(e_.data);
         }
         else {  
@@ -471,7 +470,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
             joints_[i].setCommand(tau_d_(i)); 
         }
 
-        //print_state();
+        print_state();
         save_data();
     }
 
