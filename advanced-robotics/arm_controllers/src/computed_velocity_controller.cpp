@@ -125,7 +125,7 @@ class CommandServer {
         KDL::JntArray get_acc() {
             KDL::JntArray qd_ddot;
             if (command_slot_ < commands_qd.size()) {
-                qd_ddot = commands_qd_dot.at(command_slot_);
+                qd_ddot = commands_qd_ddot.at(command_slot_);
                 
                 command_slot_++;
             }
@@ -483,7 +483,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
             joints_[i].setCommand(tau_d_(i)); 
         }
 
-        print_state();
+        //print_state();
         save_data();
     }
 
