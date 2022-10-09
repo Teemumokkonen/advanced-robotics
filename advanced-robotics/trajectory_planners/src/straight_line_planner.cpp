@@ -45,19 +45,50 @@ class trajectory_planner {
 
             ROS_INFO("Waiting for action server to start");
             ac->waitForServer();
-            ROS_INFO("Server started, sending goal");
+            ROS_INFO("Server started, please select trajectory or goal pose");
 
             n_joints_ = 6;
             // create plan for 100 steps
-            for (int i = 0; i < 10000; i++) {
-                t = t + 0.001;
-                for (size_t j = 0; j < n_joints_; j++) {
-                    goal.qd_ddot.push_back(-M_PI * M_PI / 4 * 45 * D2R * sin(M_PI / 2 * t)); // desired acceleration for the controller
-                    goal.qd_dot.push_back(M_PI / 2 * 45 * D2R * cos(M_PI / 2 * t)); // this value is the desired velocity to match with the controller
-                    goal.qd.push_back(45 * D2R * sin(M_PI / 2* t)); // desired position for each joint
-                    goal.loop = true;
+            ROS_INFO("x:=1 sine trajectory, X:=2 selectable poses, x:=3 exit");
+            int x;
+            std::cin >> x; // Get user input from the keyboard
+            if (x == 1) {
+                ROS_INFO("Making trajectory");
+                for (int i = 0; i < 1000; i++) {
+                    t = t + 0.001;
+                    for (size_t j = 0; j < n_joints_; j++) {
+                        goal.qd_ddot.push_back(-M_PI * M_PI / 4 * 45 * D2R * sin(M_PI / 2 * t)); // desired acceleration for the controller
+                        goal.qd_dot.push_back(M_PI / 2 * 45 * D2R * cos(M_PI / 2 * t)); // this value is the desired velocity to match with the controller
+                        goal.qd.push_back(45 * D2R * sin(M_PI / 2* t)); // desired position for each joint
                     }
+                }
+                bool loop;
+                ROS_INFO("should trajectory be looped?");
+                ROS_INFO("loop: true or false");
+                std::cin >> loop;
+                goal.loop = loop;
             }
+            if (x == 2) {
+                for (int i = 0; i < n_joints_; i++) {
+                    ROS_INFO("Enter angle for joint %i", i);
+                    float q;
+                    std::cin >> q; // Get user input from the keyboard
+                    goal.qd.push_back(q); // desired acceleration for the controller
+
+                    ROS_INFO("Enter velocity for joint %i", i);
+                    float q_dot;
+                    std::cin >> q_dot; // Get user input from the keyboard
+                    goal.qd_dot.push_back(q_dot); // this value is the desired velocity to match with the controller
+
+                    ROS_INFO("Enter acceleration for joint %i", i);
+                    float q_ddot;
+                    std::cin >> q_ddot; // Get user input from the keyboard
+                    goal.qd_ddot.push_back(q_ddot); // desired position for each joint
+                } 
+                goal.loop = true;
+            }
+
+            ROS_INFO("sending goal");
             ac->sendGoal(goal);
             bool finished_before_timeout = ac->waitForResult(ros::Duration(30.0));
 
@@ -73,6 +104,7 @@ class trajectory_planner {
             //exit
             
         }
+
     private:
         actionlib::SimpleActionClient<command_msgs::planAction> *ac;
         std::vector<std::string> joint_names_;
@@ -89,6 +121,8 @@ int main(int argc, char **agrv)
     ros::NodeHandle n;
     trajectory_planners::trajectory_planner *planner = new trajectory_planners::trajectory_planner();
     planner->init();
-    planner->plan_and_send(n);
+    while (true) {
+        planner->plan_and_send(n);
+    }
     return 0;
 }
