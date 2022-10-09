@@ -56,7 +56,6 @@ class trajectory_planner {
                     goal.qd_dot.push_back(M_PI / 2 * 45 * D2R * cos(M_PI / 2 * t)); // this value is the desired velocity to match with the controller
                     goal.qd.push_back(45 * D2R * sin(M_PI / 2* t)); // desired position for each joint
                     goal.loop = true;
-
                     }
             }
             ac->sendGoal(goal);

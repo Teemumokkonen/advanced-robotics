@@ -28,4 +28,4 @@ elfin:
       root_link: world
       tip_link: elfin_link6
       Joint_space: true # define if the command calculations are done in the joint space or in task space
-      frame_error: true # define the error for defination type for the frame error
+      frame_error: false # define the error for defination type for the frame error

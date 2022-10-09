@@ -188,6 +188,8 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         // 1.2.1 Joint Controller
         J_.resize(kdl_chain_.getNrOfJoints());
         J_inv_.resize(kdl_chain_.getNrOfJoints());
+        J_trans_.resize(kdl_chain_.getNrOfJoints());
+        J_temp_.resize(kdl_chain_.getNrOfJoints());
         Kp_.resize(n_joints_);
         Kd_.resize(n_joints_);
         Ki_.resize(n_joints_);
@@ -357,7 +359,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         G_.resize(kdl_chain_.getNrOfJoints());
         Jd_.resize(kdl_chain_.getNrOfJoints());
         J_.resize(kdl_chain_.getNrOfJoints());
-
+        
         // 6.1 publisher
         pub_qd_ = n.advertise<std_msgs::Float64MultiArray>("qd", 1000);
         pub_q_ = n.advertise<std_msgs::Float64MultiArray>("q", 1000);
@@ -441,13 +443,22 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
                 Xerr_.vel = diff(x_.p, xd_.p);
             }
 
-    
             J_inv_.data = J_.data.inverse(); // inverse of the jacobian 
+            J_trans_.data = J_.data.transpose();
             Vcmd_ = Vd_ + 1.0*Xerr_;
             for (size_t i = 0; i < n_joints_; i++) {
                 Vcmd_jnt_.data[i] = Vcmd_[i];
             }
-            q_dot_cmd_.data = J_inv_.data * Vcmd_jnt_.data;
+
+            MatrixXd I = MatrixXd::Identity(n_joints_, n_joints_);
+            if (J_.data.determinant() == 0) {
+                ROS_INFO("Jacobian is not invertable");
+                J_temp_.data = (J_.data * J_trans_.data + 0.2 * I);
+                q_dot_cmd_.data = J_trans_.data * J_temp_.data.inverse() * Vcmd_jnt_.data;
+            }
+            else {
+                q_dot_cmd_.data = J_inv_.data * Vcmd_jnt_.data;
+            }
         }
 
         // ********* 2.2 Velocity controller *********
@@ -644,6 +655,8 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
     KDL::Jacobian J_;
     KDL::Jacobian Jd_;
     KDL::Jacobian J_inv_;
+    KDL::Jacobian J_trans_;
+    KDL::Jacobian J_temp_;
 
     // kdl solver
     boost::scoped_ptr<KDL::ChainDynParam> id_solver_;                  // Solver To compute the inverse dynamics
