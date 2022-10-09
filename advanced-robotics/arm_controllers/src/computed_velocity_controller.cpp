@@ -77,17 +77,12 @@ class CommandServer {
                     commands_qd_dot.push_back(qd_dot_);
                     commands_qd_ddot.push_back(qd_ddot_);
                     command_flow = 0;
-                    //printf("qd_(0): %f, ", qd_(0)*R2D);
-                    //printf("qd_(1): %f, ", qd_(1)*R2D);
-                    //printf("qd_(2): %f, ", qd_(2)*R2D);
-                    //printf("qd_(3): %f, ", qd_(3)*R2D);
-                    //printf("qd_(4): %f, ", qd_(4)*R2D);
-                    //printf("qd_(5): %f\n", qd_(5)*R2D);
                 }
                 else {
                     command_flow++;
                 }
             }
+            loop = goal->loop;
             ROS_INFO("Request has been parsed, plan has been set");
             result_.pose_reached = true;
             as_.setSucceeded(result_);
@@ -101,8 +96,14 @@ class CommandServer {
             }
 
             else {
-                qd.data = Eigen::VectorXd::Zero(n_joints_);
+                if (loop == false) {
+                    qd.data = Eigen::VectorXd::Zero(n_joints_);
+                }
+                else {
+                    command_slot_ = 0; 
+                    qd = commands_qd.at(command_slot_);
 
+                }
             }
             return qd;
         }
@@ -149,7 +150,8 @@ class CommandServer {
         std::vector<float> trajectory;
         KDL::JntArray qd_, qd_dot_, qd_ddot_;
         std::vector<KDL::JntArray> commands_qd, commands_qd_dot, commands_qd_ddot;
-};
+        bool loop = false;
+};  
 
 namespace arm_controllers
 {
