@@ -4,7 +4,7 @@
 
 #include <pluginlib/class_list_macros.h>
 #include <std_msgs/Float64MultiArray.h>
-
+#include <vector>
 #include <urdf/model.h>
 
 // from kdl packages
@@ -48,6 +48,7 @@ class CommandServer {
             action_name_(name),
             n_joints_ (n_joints)
         {
+            // initialize a default state to be at zero
             command_slot_ = 0;
             qd_.data = Eigen::VectorXd::Zero(n_joints_);
             qd_dot_.data = Eigen::VectorXd::Zero(n_joints_);
@@ -65,11 +66,18 @@ class CommandServer {
 
         void executeCB(const command_msgs::planGoalConstPtr &goal) {
             ROS_INFO("Got request from the client");
-            commands_qd.clear();
-            commands_qd_dot.clear();
-            commands_qd_ddot.clear();
             command_slot_ = 0;
             int command_flow = 0;
+
+            // Keep prev commands
+            ROS_INFO("request size %li", goal->qd.size());
+            if(commands_qd.size() > 1)  
+            {
+                ROS_INFO("removing elements");
+                commands_qd.erase(commands_qd.begin(), commands_qd.end() - 1);
+                commands_qd_dot.erase(commands_qd_dot.begin(), commands_qd_dot.end() - 1);
+                commands_qd_ddot.erase(commands_qd_ddot.begin(), commands_qd_ddot.end() - 1);
+            }
 
             for (int i = 0; i < goal->qd.size() - 1; i++) {
                 qd_(command_flow) = goal->qd.at(i);
@@ -85,6 +93,10 @@ class CommandServer {
                     command_flow++;
                 }
             }
+            ROS_INFO("command size %li", commands_qd.size());
+            commands_qd.erase(commands_qd.begin());
+            commands_qd_dot.erase(commands_qd_dot.begin());
+            commands_qd_ddot.erase(commands_qd_ddot.begin());
             loop = goal->loop;
             ROS_INFO("Request has been parsed, plan has been set");
             result_.pose_reached = true;
@@ -92,6 +104,8 @@ class CommandServer {
         }
 
         void get_state(KDL::JntArray& qd, KDL::JntArray& qd_dot, KDL::JntArray& qd_ddot) {
+            //ROS_INFO("%i", loop);
+            //ROS_INFO("%i", command_slot_);
             if (command_slot_ < commands_qd.size()) {
                 qd = commands_qd.at(command_slot_);
                 qd_dot = commands_qd_dot.at(command_slot_);
@@ -104,7 +118,6 @@ class CommandServer {
                     command_slot_ = 0; 
                 }
                 else {
-                    // keep the last state in list
                     qd = commands_qd.at(command_slot_ - 1);
                     qd_dot = commands_qd_dot.at(command_slot_ - 1);
                     qd_ddot = commands_qd_ddot.at(command_slot_ - 1);
@@ -387,6 +400,14 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         //}
         
         cs_->get_state(qd_, qd_dot_, qd_ddot_);
+        //printf("*** Desired State in Joint Space (unit: deg) ***\n");
+        //printf("qd_(0): %f, ", qd_(0)*R2D);
+        //printf("qd_(1): %f, ", qd_(1)*R2D);
+        //printf("qd_(2): %f, ", qd_(2)*R2D);
+        //printf("qd_(3): %f, ", qd_(3)*R2D);
+        //printf("qd_(4): %f, ", qd_(4)*R2D);
+        //printf("qd_(5): %f\n", qd_(5)*R2D);
+        //printf("\n");
         // ********* 1. Desired Trajectory in Task space *********
         if (joint_space_ == false)
         {

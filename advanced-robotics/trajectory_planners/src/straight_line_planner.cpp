@@ -54,7 +54,8 @@ class trajectory_planner {
             std::cin >> x; // Get user input from the keyboard
             if (x == 1) {
                 ROS_INFO("Making trajectory");
-                for (int i = 0; i < 1000; i++) {
+                t = 0;
+                for (int i = 0; i < 3000; i++) {
                     t = t + 0.001;
                     for (size_t j = 0; j < n_joints_; j++) {
                         goal.qd_ddot.push_back(-M_PI * M_PI / 4 * 45 * D2R * sin(M_PI / 2 * t)); // desired acceleration for the controller
@@ -67,6 +68,7 @@ class trajectory_planner {
                 ROS_INFO("loop: true or false");
                 std::cin >> loop;
                 goal.loop = loop;
+                
             }
             if (x == 2) {
                 for (int i = 0; i < n_joints_; i++) {
@@ -96,10 +98,16 @@ class trajectory_planner {
             {
                 actionlib::SimpleClientGoalState state = ac->getState();
                 ROS_INFO("Action finished: %s",state.toString().c_str());
+                goal.qd.clear();
+                goal.qd_dot.clear();
+                goal.qd_ddot.clear();
                 return true;
             }
             else
                 ROS_INFO("Action did not finish before the time out.");
+                goal.qd.clear();
+                goal.qd_dot.clear();
+                goal.qd_ddot.clear();
                 return false;
             //exit
             
