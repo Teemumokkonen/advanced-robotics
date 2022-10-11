@@ -52,6 +52,9 @@ class CommandServer {
             qd_.data = Eigen::VectorXd::Zero(n_joints_);
             qd_dot_.data = Eigen::VectorXd::Zero(n_joints_);
             qd_ddot_.data = Eigen::VectorXd::Zero(n_joints_);
+            commands_qd.push_back(qd_);
+            commands_qd_dot.push_back(qd_dot_);
+            commands_qd_ddot.push_back(qd_ddot_);
             as_.start();
 
         }
@@ -88,54 +91,27 @@ class CommandServer {
             as_.setSucceeded(result_);
         }
 
-        KDL::JntArray get_pos() {
-            KDL::JntArray qd;
+        void get_state(KDL::JntArray& qd, KDL::JntArray& qd_dot, KDL::JntArray& qd_ddot) {
             if (command_slot_ < commands_qd.size()) {
                 qd = commands_qd.at(command_slot_);
-                
-            }
-
-            else {
-                if (loop == false) {
-                    qd.data = Eigen::VectorXd::Zero(n_joints_);
-                }
-                else {
-                    command_slot_ = 0; 
-                    qd = commands_qd.at(command_slot_);
-
-                }
-            }
-            return qd;
-        }
-
-        KDL::JntArray get_vel() {
-            KDL::JntArray qd_dot;
-            if (command_slot_ < commands_qd.size()) {
                 qd_dot = commands_qd_dot.at(command_slot_);
-                
-            }
-
-            else {
-                qd_dot.data = Eigen::VectorXd::Zero(n_joints_);
-
-            }
-            return qd_dot;
-        }
-
-        KDL::JntArray get_acc() {
-            KDL::JntArray qd_ddot;
-            if (command_slot_ < commands_qd.size()) {
                 qd_ddot = commands_qd_ddot.at(command_slot_);
-                
                 command_slot_++;
             }
 
             else {
-                qd_ddot.data = Eigen::VectorXd::Zero(n_joints_);
-
+                if (loop == true) {
+                    command_slot_ = 0; 
+                }
+                else {
+                    // keep the last state in list
+                    qd = commands_qd.at(command_slot_ - 1);
+                    qd_dot = commands_qd_dot.at(command_slot_ - 1);
+                    qd_ddot = commands_qd_ddot.at(command_slot_ - 1);
+                }
             }
-            return qd_ddot;
         }
+
 
     protected:
         ros::NodeHandle nh_;
@@ -409,9 +385,8 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         //    qd_dot_(i) = M_PI / 2 * 45 * KDL::deg2rad * cos(M_PI / 2 * t); // this value is the desired velocity to match with the controller
         //    qd_(i) = 45 * KDL::deg2rad * sin(M_PI / 2* t); // desired position for each joint
         //}
-        qd_ = cs_->get_pos();
-        qd_dot_ = cs_->get_vel();
-        qd_ddot_ = cs_->get_acc();
+        
+        cs_->get_state(qd_, qd_dot_, qd_ddot_);
         // ********* 1. Desired Trajectory in Task space *********
         if (joint_space_ == false)
         {
