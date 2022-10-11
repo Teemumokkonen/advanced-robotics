@@ -400,14 +400,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         //}
         
         cs_->get_state(qd_, qd_dot_, qd_ddot_);
-        //printf("*** Desired State in Joint Space (unit: deg) ***\n");
-        //printf("qd_(0): %f, ", qd_(0)*R2D);
-        //printf("qd_(1): %f, ", qd_(1)*R2D);
-        //printf("qd_(2): %f, ", qd_(2)*R2D);
-        //printf("qd_(3): %f, ", qd_(3)*R2D);
-        //printf("qd_(4): %f, ", qd_(4)*R2D);
-        //printf("qd_(5): %f\n", qd_(5)*R2D);
-        //printf("\n");
+        
         // ********* 1. Desired Trajectory in Task space *********
         if (joint_space_ == false)
         {

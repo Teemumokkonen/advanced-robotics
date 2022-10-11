@@ -9,6 +9,7 @@ project(trajectory_planners)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
             roscpp
+            kdl_parser
             actionlib
             actionlib_msgs
             command_msgs
