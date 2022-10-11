@@ -64,7 +64,7 @@ class trajectory_planner {
             ROS_INFO("Server started, please select trajectory or goal pose");
 
             // create plan for 100 steps
-            ROS_INFO("x:=1 sine trajectory, x:=2 selectable poses for each joint, x:=3 exit");
+            ROS_INFO("x:=1 sine trajectory, x:=2 selectable poses for each joint, x:=3 plan in task space x:=4 exit");
             int x;
             std::cin >> x; // Get user input from the keyboard
             if (x == 1) {
@@ -83,6 +83,7 @@ class trajectory_planner {
                 ROS_INFO("loop: true or false");
                 std::cin >> loop;
                 goal.loop = loop;
+                goal.task_space = false;
                 
             }
             if (x == 2) {
@@ -116,6 +117,22 @@ class trajectory_planner {
                 ROS_INFO("loop: true or false");
                 std::cin >> loop;
                 goal.loop = loop;
+                goal.task_space = false;
+            }
+
+            if (x==4) {
+                // generate the plan in the task space
+                
+                // for the lack of definations do like:
+
+                goal.qd.push_back(0.0); // ee x
+                goal.qd_dot.push_back(0.0); // ee y
+                goal.qd_ddot.push_back(0.0); // ee z
+                goal.x_rot.push_back(0.0);
+                goal.y_rot.push_back(0.0);
+                goal.z_rot.push_back(0.0);
+                goal.task_space = true;
+                goal.loop = true;
             }
 
             if (x==3) {
@@ -172,7 +189,6 @@ int main(int argc, char **agrv)
 {
     ros::init(argc, agrv, "trajectory_planner");
     ros::NodeHandle n;
-    ros::Rate loopRate(10);
     trajectory_planners::trajectory_planner *planner = new trajectory_planners::trajectory_planner();
     ros::AsyncSpinner spinner(0);
     spinner.start();

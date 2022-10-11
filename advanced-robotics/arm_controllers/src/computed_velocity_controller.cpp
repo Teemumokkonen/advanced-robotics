@@ -66,11 +66,52 @@ class CommandServer {
 
         void executeCB(const command_msgs::planGoalConstPtr &goal) {
             ROS_INFO("Got request from the client");
+
+            if (goal->task_space == false) {
+                joint_space_plan(goal);
+            }
+            else {
+                task_space_plan(goal);
+            }
+        
+        }
+
+        void task_space_plan(const command_msgs::planGoalConstPtr &goal) {
+            // Keep prev commands
             command_slot_ = 0;
             int command_flow = 0;
-
-            // Keep prev commands
             ROS_INFO("request size %li", goal->qd.size());
+            if(commands_task_line.size() > 1)  
+            {
+                ROS_INFO("removing elements");
+                commands_task_line.erase(commands_task_line.begin(), commands_task_line.end() - 1);
+            }
+
+            for (int i = 0; i < goal->qd.size() - 1; i++) {
+                // vector
+                pose_.p(0) = goal->qd.at(i);
+                pose_.p(1) = goal->qd_dot.at(i);
+                pose_.p(2) = goal->qd_ddot.at(i); 
+                // rotations     
+                pose_.M = pose_.M.RPY(goal->x_rot.at(i), goal->y_rot.at(i), goal->z_rot.at(i));
+                commands_task_line.push_back(pose_);
+            }   
+
+            ROS_INFO("command size %li", commands_qd.size());
+            commands_qd.erase(commands_qd.begin());
+            commands_qd_dot.erase(commands_qd_dot.begin());
+            commands_qd_ddot.erase(commands_qd_ddot.begin());
+            loop = goal->loop;
+            ROS_INFO("Request has been parsed, plan has been set");
+            result_.pose_reached = true;
+            as_.setSucceeded(result_);
+        }
+
+        void joint_space_plan(const command_msgs::planGoalConstPtr &goal) {
+            // Keep prev commands
+            command_slot_ = 0;
+            int command_flow = 0;
+            ROS_INFO("request size for task space commands size %li", goal->qd.size());
             if(commands_qd.size() > 1)  
             {
                 ROS_INFO("removing elements");
@@ -125,6 +166,20 @@ class CommandServer {
             }
         }
 
+        void get_ee_point(KDL::Frame& xd_){
+            if (command_slot_ < commands_task_line.size()) {
+                xd_ = commands_task_line.at(command_slot_);
+            }
+            else {
+                if (loop == true) {
+                    command_slot_ = 0;
+                }
+                else {
+                    xd_ = commands_task_line.at(command_slot_ - 1);
+                }
+            }
+        }
+
 
     protected:
         ros::NodeHandle nh_;
@@ -139,6 +194,8 @@ class CommandServer {
         std::vector<float> trajectory;
         KDL::JntArray qd_, qd_dot_, qd_ddot_;
         std::vector<KDL::JntArray> commands_qd, commands_qd_dot, commands_qd_ddot;
+        KDL::Frame pose_;
+        std::vector<KDL::Frame> commands_task_line;
         bool loop = false;
 };  
 
@@ -399,26 +456,33 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         //    qd_(i) = 45 * KDL::deg2rad * sin(M_PI / 2* t); // desired position for each joint
         //}
         
-        cs_->get_state(qd_, qd_dot_, qd_ddot_);
-        
-        // ********* 1. Desired Trajectory in Task space *********
-        if (joint_space_ == false)
-        {
-            fk_pos_solver_->JntToCart(qd_, xd_); // desired end effector pos
-            jnt_to_jac_solver_->JntToJac(qd_, Jd_); // jacobian of the desired state
-            Vd_jnt_.data = Jd_.data * qd_dot_.data;
-            for (size_t i = 0; i < n_joints_; i++) {
-                Vd_[i] = Vd_jnt_.data[i]; // populate the twist with the correct elements
-            }
+        if (joint_space_ == true) {
+            cs_->get_state(qd_, qd_dot_, qd_ddot_);
         }
+        else {
+            cs_->get_ee_point(xd_);
+        }
+
+        // ********* 1. Desired Trajectory in Task space *********
+        //if (joint_space_ == false)
+        //{
+        //    fk_pos_solver_->JntToCart(qd_, xd_); // desired end effector pos
+        //    jnt_to_jac_solver_->JntToJac(qd_, Jd_); // jacobian of the desired state
+        //    Vd_jnt_.data = Jd_.data * qd_dot_.data;
+        //    for (size_t i = 0; i < n_joints_; i++) {
+        //        Vd_[i] = Vd_jnt_.data[i]; // populate the twist with the correct elements
+        //    }
+        //}
 
         // ********* 2.2 Kinematic controller *********
         e_.data = qd_.data - q_.data; // error for the joint states 
+
         if (joint_space_ == true)
         {      
             // kinematic control command in joint space
             q_dot_cmd_.data = qd_dot_.data + Kp_.data.cwiseProduct(e_.data);
         }
+
         else {  
             // kinematic control command in the Task space
             fk_pos_solver_->JntToCart(q_, x_); // end effector poss 
@@ -434,7 +498,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
 
             J_inv_.data = J_.data.inverse(); // inverse of the jacobian 
             J_trans_.data = J_.data.transpose();
-            Vcmd_ = Vd_ + 1.0*Xerr_;
+            Vcmd_ = Vd_ + 10.0*Xerr_;
             for (size_t i = 0; i < n_joints_; i++) {
                 Vcmd_jnt_.data[i] = Vcmd_[i];
             }

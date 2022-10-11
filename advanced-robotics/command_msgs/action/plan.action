@@ -2,7 +2,12 @@
 float32[] qd
 float32[] qd_dot
 float32[] qd_ddot
+float32[] x_rot
+float32[] y_rot
+float32[] z_rot
+
 bool loop
+bool task_space
 ---
 #result definition
 bool pose_reached
