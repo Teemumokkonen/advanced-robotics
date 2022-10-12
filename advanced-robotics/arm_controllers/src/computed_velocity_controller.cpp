@@ -75,10 +75,10 @@ class CommandServer {
 
         void executeCB(const command_msgs::planGoalConstPtr &goal) {
             ROS_INFO("Got request from the client");
-
-            if (goal->task_space == false) {
+            task_space_ = goal->task_space;
+            if (task_space_ == false) {
                 ROS_INFO("Getting commands in joint space");
-                joint_space_plan(goal);
+                task_spaceplan(goal);
             }
             else {
                 ROS_INFO("Getting commands in task space");
@@ -117,7 +117,7 @@ class CommandServer {
             as_.setSucceeded(result_);
         }
 
-        void joint_space_plan(const command_msgs::planGoalConstPtr &goal) {
+        void task_spaceplan(const command_msgs::planGoalConstPtr &goal) {
             // Keep prev commands
             command_slot_ = 0;
             int command_flow = 0;
@@ -189,6 +189,10 @@ class CommandServer {
             }
         }
 
+        bool get_plan_type() {
+            return task_space_;
+        }
+
 
     protected:
         ros::NodeHandle nh_;
@@ -206,6 +210,7 @@ class CommandServer {
         KDL::Frame pose_;
         std::vector<KDL::Frame> commands_task_space;
         bool loop = false;
+        bool task_space_ = true;
 };  
 
 namespace arm_controllers
@@ -285,11 +290,6 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
             }
         }
 
-        bool joint_space;
-        if (n.getParam("Joint_space", joint_space))
-        {
-            joint_space_ = joint_space;
-        } 
         bool frame_error;
         if (n.getParam("frame_error", frame_error))
         {
@@ -458,8 +458,8 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         }
 
         // ********* 1. Desired Trajectory in Joint Space *********
-        
-        if (joint_space_ == true) {
+        task_space = cs_->get_plan_type();
+        if (task_space == false) {
             cs_->get_state(qd_, qd_dot_, qd_ddot_);
         }
         else {
@@ -467,7 +467,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         }
 
         // ********* 1. Desired Trajectory in Task space *********
-        //if (joint_space_ == false)
+        //if (task_space == false)
         //{
         //    fk_pos_solver_->JntToCart(qd_, xd_); // desired end effector pos
         //    jnt_to_jac_solver_->JntToJac(qd_, Jd_); // jacobian of the desired state
@@ -480,7 +480,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         // ********* 2.2 Kinematic controller *********
         e_.data = qd_.data - q_.data; // error for the joint states 
 
-        if (joint_space_ == true)
+        if (task_space == false)
         {      
             // kinematic control command in joint space
             q_dot_cmd_.data = qd_dot_.data + Kp_.data.cwiseProduct(e_.data);
@@ -504,25 +504,6 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
             //Vcmd_ = Vd_ + 2.5*Xerr_;
             
             Vcmd_ = 2.5*Xerr_;
-
-            //ROS_INFO("Xerr_ 0: %f", Xerr_(0));
-            //ROS_INFO("Xerr_ 1: %f", Xerr_(1));
-            //ROS_INFO("Xerr_ 2: %f", Xerr_(2));
-            //ROS_INFO("Xerr_ 3: %f", Xerr_(3));
-            //ROS_INFO("Xerr_ 4: %f", Xerr_(4));
-            //ROS_INFO("Xerr_ 5: %f", Xerr_(5));
-            //ROS_INFO("\n");
-//
-            //ROS_INFO("x_0: %f", x_.p(0));
-            //ROS_INFO("x_1: %f", x_.p(1));
-            //ROS_INFO("x_2: %f", x_.p(2));
-            //ROS_INFO("\n");
-//
-            //ROS_INFO("xd_0: %f", xd_.p(0));
-            //ROS_INFO("xd_1: %f", xd_.p(1));
-            //ROS_INFO("xd_2: %f", xd_.p(2));
-            //ROS_INFO("\n");
-
             //inv_solver_->CartToJnt(q_, Vcmd_, Vcmd_jnt_);
             for (size_t i = 0; i < n_joints_; i++) {
                 Vcmd_jnt_.data[i] = Vcmd_[i];
@@ -783,7 +764,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
     std_msgs::Float64MultiArray msg_SaveData_;
 
     // params for using different controller types and calculations
-    bool joint_space_;
+    bool task_space;
     bool frame_error_;
 
     CommandServer* cs_;

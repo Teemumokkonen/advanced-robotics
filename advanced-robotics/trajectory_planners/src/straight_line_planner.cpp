@@ -86,6 +86,7 @@ class trajectory_planner {
                 goal.task_space = false;
                 
             }
+
             if (x == 2) {
                 ROS_INFO("Making straight line trajectory");
                 t = 0;
@@ -124,11 +125,14 @@ class trajectory_planner {
                 // generate the plan in the task space
                 
                 // for the lack of definations do like:
-
-                goal.qd.push_back(0.0); // ee x
-                goal.qd_dot.push_back(0.0); // ee y
                 float c;
-                ROS_INFO("Give pose:");
+                ROS_INFO("Give pose x:");
+                std::cin >> c;
+                goal.qd.push_back(c); // ee x
+                ROS_INFO("Give pose: y");
+                std::cin >> c;
+                goal.qd_dot.push_back(c); // ee y
+                ROS_INFO("Give pose z:");
                 std::cin >> c;
                 goal.qd_ddot.push_back(c); // ee z
                 goal.x_rot.push_back(0.0);
@@ -138,9 +142,6 @@ class trajectory_planner {
                 goal.loop = false;
             }
 
-            else {
-                return false;
-            }
 
             ROS_INFO("sending goal");
             ac->sendGoal(goal);
