@@ -16,7 +16,7 @@
 #include <kdl/chaindynparam.hpp>              // inverse dynamics
 #include <kdl/chainjnttojacsolver.hpp> 
 #include <kdl/chainfksolverpos_recursive.hpp>
-
+#include <kdl/chainiksolvervel_pinv.hpp>
 #include <utils/pseudo_inversion.h>
 #include <utils/skew_symmetric.h>
 
@@ -48,8 +48,17 @@ class CommandServer {
             action_name_(name),
             n_joints_ (n_joints)
         {
-            // initialize a default state to be at zero
+            // initialize a default state to be at zero for bot task and joint space
             command_slot_ = 0;
+
+            pose_.p(0) = 0.0;
+            pose_.p(1) = 0.0;
+            pose_.p(2) = 0.7;
+            pose_.M.DoRotX(0.0);
+            pose_.M.DoRotY(0.0);
+            pose_.M.DoRotZ(0.0);
+            commands_task_space.push_back(pose_);
+
             qd_.data = Eigen::VectorXd::Zero(n_joints_);
             qd_dot_.data = Eigen::VectorXd::Zero(n_joints_);
             qd_ddot_.data = Eigen::VectorXd::Zero(n_joints_);
@@ -68,9 +77,11 @@ class CommandServer {
             ROS_INFO("Got request from the client");
 
             if (goal->task_space == false) {
+                ROS_INFO("Getting commands in joint space");
                 joint_space_plan(goal);
             }
             else {
+                ROS_INFO("Getting commands in task space");
                 task_space_plan(goal);
             }
         
@@ -81,26 +92,25 @@ class CommandServer {
             command_slot_ = 0;
             int command_flow = 0;
             ROS_INFO("request size %li", goal->qd.size());
-            if(commands_task_line.size() > 1)  
+            if(commands_task_space.size() > 1)  
             {
                 ROS_INFO("removing elements");
-                commands_task_line.erase(commands_task_line.begin(), commands_task_line.end() - 1);
+                commands_task_space.erase(commands_task_space.begin(), commands_task_space.end() - 1);
             }
 
-            for (int i = 0; i < goal->qd.size() - 1; i++) {
-                // vector
+            for (int i = 0; i < goal->qd.size(); i++) {
+                // pose
                 pose_.p(0) = goal->qd.at(i);
                 pose_.p(1) = goal->qd_dot.at(i);
                 pose_.p(2) = goal->qd_ddot.at(i); 
+                ROS_INFO("%f",  goal->qd_ddot.at(i));
                 // rotations     
                 pose_.M = pose_.M.RPY(goal->x_rot.at(i), goal->y_rot.at(i), goal->z_rot.at(i));
-                commands_task_line.push_back(pose_);
+                commands_task_space.push_back(pose_);
             }   
 
             ROS_INFO("command size %li", commands_qd.size());
-            commands_qd.erase(commands_qd.begin());
-            commands_qd_dot.erase(commands_qd_dot.begin());
-            commands_qd_ddot.erase(commands_qd_ddot.begin());
+            commands_task_space.erase(commands_task_space.begin());
             loop = goal->loop;
             ROS_INFO("Request has been parsed, plan has been set");
             result_.pose_reached = true;
@@ -145,8 +155,6 @@ class CommandServer {
         }
 
         void get_state(KDL::JntArray& qd, KDL::JntArray& qd_dot, KDL::JntArray& qd_ddot) {
-            //ROS_INFO("%i", loop);
-            //ROS_INFO("%i", command_slot_);
             if (command_slot_ < commands_qd.size()) {
                 qd = commands_qd.at(command_slot_);
                 qd_dot = commands_qd_dot.at(command_slot_);
@@ -167,15 +175,16 @@ class CommandServer {
         }
 
         void get_ee_point(KDL::Frame& xd_){
-            if (command_slot_ < commands_task_line.size()) {
-                xd_ = commands_task_line.at(command_slot_);
+            if (command_slot_ < commands_task_space.size()) {
+                xd_ = commands_task_space.at(command_slot_);
+                command_slot_++;
             }
             else {
                 if (loop == true) {
                     command_slot_ = 0;
                 }
                 else {
-                    xd_ = commands_task_line.at(command_slot_ - 1);
+                    xd_ = commands_task_space.at(command_slot_ - 1);
                 }
             }
         }
@@ -195,7 +204,7 @@ class CommandServer {
         KDL::JntArray qd_, qd_dot_, qd_ddot_;
         std::vector<KDL::JntArray> commands_qd, commands_qd_dot, commands_qd_ddot;
         KDL::Frame pose_;
-        std::vector<KDL::Frame> commands_task_line;
+        std::vector<KDL::Frame> commands_task_space;
         bool loop = false;
 };  
 
@@ -377,6 +386,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         gravity_(2) = -9.81;            // 0: x-axis 1: y-axis 2: z-axis
 
         id_solver_.reset(new KDL::ChainDynParam(kdl_chain_, gravity_));
+        inv_solver_.reset(new KDL::ChainIkSolverVel_pinv(kdl_chain_));
         jnt_to_jac_solver_.reset(new KDL::ChainJntToJacSolver(kdl_chain_));
         fk_pos_solver_.reset(new KDL::ChainFkSolverPos_recursive(kdl_chain_));
 
@@ -448,13 +458,6 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         }
 
         // ********* 1. Desired Trajectory in Joint Space *********
-
-        //for (size_t i = 0; i < n_joints_; i++)
-        //{
-        //    qd_ddot_(i) = -M_PI * M_PI / 4 * 45 * KDL::deg2rad * sin(M_PI / 2 * t); // desired acceleration for the controller
-        //    qd_dot_(i) = M_PI / 2 * 45 * KDL::deg2rad * cos(M_PI / 2 * t); // this value is the desired velocity to match with the controller
-        //    qd_(i) = 45 * KDL::deg2rad * sin(M_PI / 2* t); // desired position for each joint
-        //}
         
         if (joint_space_ == true) {
             cs_->get_state(qd_, qd_dot_, qd_ddot_);
@@ -489,26 +492,50 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
             jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
             if (frame_error_ == true) 
             {
-                Xerr_ = diff(x_, xd_); // error from the frame
+                Xerr_ = diff(x_, xd_) / t_; // error from the frame
             }
             else {
-                Xerr_.rot = diff(x_.M, xd_.M);
-                Xerr_.vel = diff(x_.p, xd_.p);
+                Xerr_.rot = diff(x_.M, xd_.M) / t_;
+                Xerr_.vel = diff(x_.p, xd_.p) / t_;
             }
 
             J_inv_.data = J_.data.inverse(); // inverse of the jacobian 
             J_trans_.data = J_.data.transpose();
-            Vcmd_ = Vd_ + 10.0*Xerr_;
+            //Vcmd_ = Vd_ + 2.5*Xerr_;
+            
+            Vcmd_ = 2.5*Xerr_;
+
+            //ROS_INFO("Xerr_ 0: %f", Xerr_(0));
+            //ROS_INFO("Xerr_ 1: %f", Xerr_(1));
+            //ROS_INFO("Xerr_ 2: %f", Xerr_(2));
+            //ROS_INFO("Xerr_ 3: %f", Xerr_(3));
+            //ROS_INFO("Xerr_ 4: %f", Xerr_(4));
+            //ROS_INFO("Xerr_ 5: %f", Xerr_(5));
+            //ROS_INFO("\n");
+//
+            //ROS_INFO("x_0: %f", x_.p(0));
+            //ROS_INFO("x_1: %f", x_.p(1));
+            //ROS_INFO("x_2: %f", x_.p(2));
+            //ROS_INFO("\n");
+//
+            //ROS_INFO("xd_0: %f", xd_.p(0));
+            //ROS_INFO("xd_1: %f", xd_.p(1));
+            //ROS_INFO("xd_2: %f", xd_.p(2));
+            //ROS_INFO("\n");
+
+            //inv_solver_->CartToJnt(q_, Vcmd_, Vcmd_jnt_);
             for (size_t i = 0; i < n_joints_; i++) {
                 Vcmd_jnt_.data[i] = Vcmd_[i];
             }
 
             MatrixXd I = MatrixXd::Identity(n_joints_, n_joints_);
-            if (J_.data.determinant() == 0) {
-                ROS_INFO("Jacobian is not invertable");
+            
+            float det = J_.data.determinant();
+            if (-0.00001 < det && det < 0.00001) {
                 J_temp_.data = (J_.data * J_trans_.data + 0.2 * I);
                 q_dot_cmd_.data = J_trans_.data * J_temp_.data.inverse() * Vcmd_jnt_.data;
             }
+
             else {
                 q_dot_cmd_.data = J_inv_.data * Vcmd_jnt_.data;
             }
@@ -715,6 +742,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
     boost::scoped_ptr<KDL::ChainDynParam> id_solver_;                  // Solver To compute the inverse dynamics
     boost::scoped_ptr<KDL::ChainJntToJacSolver> jnt_to_jac_solver_; // solver for jacobian
     boost::scoped_ptr<KDL::ChainFkSolverPos_recursive> fk_pos_solver_;
+    boost::scoped_ptr<KDL::ChainIkSolverVel_pinv> inv_solver_;
 
     // Joint Space State
     KDL::JntArray qd_, qd_dot_, qd_ddot_, q_dot_cmd_;
@@ -760,6 +788,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
 
     CommandServer* cs_;
 
+    float t_ = 1.0;
 };
 }; // namespace arm_controllers
 PLUGINLIB_EXPORT_CLASS(arm_controllers::ComputedVelocityController, controller_interface::ControllerBase)

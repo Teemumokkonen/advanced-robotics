@@ -70,7 +70,7 @@ class trajectory_planner {
             if (x == 1) {
                 ROS_INFO("Making trajectory");
                 t = 0;
-                for (int i = 0; i < 3000; i++) {
+                for (int i = 0; i < 4000; i++) {
                     t = t + 0.001;
                     for (size_t j = 0; j < n_joints_; j++) {
                         goal.qd_ddot.push_back(-M_PI * M_PI / 4 * 45 * D2R * sin(M_PI / 2 * t)); // desired acceleration for the controller
@@ -120,22 +120,25 @@ class trajectory_planner {
                 goal.task_space = false;
             }
 
-            if (x==4) {
+            if (x==3) {
                 // generate the plan in the task space
                 
                 // for the lack of definations do like:
 
                 goal.qd.push_back(0.0); // ee x
                 goal.qd_dot.push_back(0.0); // ee y
-                goal.qd_ddot.push_back(0.0); // ee z
+                float c;
+                ROS_INFO("Give pose:");
+                std::cin >> c;
+                goal.qd_ddot.push_back(c); // ee z
                 goal.x_rot.push_back(0.0);
                 goal.y_rot.push_back(0.0);
                 goal.z_rot.push_back(0.0);
                 goal.task_space = true;
-                goal.loop = true;
+                goal.loop = false;
             }
 
-            if (x==3) {
+            else {
                 return false;
             }
 
