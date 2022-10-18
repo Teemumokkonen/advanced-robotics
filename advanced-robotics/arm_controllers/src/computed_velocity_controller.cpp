@@ -1,3 +1,14 @@
+/*
+ * This file contains plugin for controlling the robot with velocity controller and kinematic controller 
+ * in Joint space and task space.
+ * This controller can take commands in the task and Joint space.
+ * 
+ * Robot is always initialized in the some position in the task space control,
+ * but the the control method can be changed on the fly to be either in joint space or in task space,
+ * which is defined by the trajectory planner.
+*/
+
+
 // from ros-control meta packages
 #include <controller_interface/controller.h>
 #include <hardware_interface/joint_command_interface.h>
@@ -51,9 +62,10 @@ class CommandServer {
             // initialize a default state to be at zero for bot task and joint space
             command_slot_ = 0;
 
+            // Some random non singular pose for the robot in task space. 
             pose_.p(0) = 0.0;
             pose_.p(1) = 0.0;
-            pose_.p(2) = 0.7;
+            pose_.p(2) = 0.7; 
             pose_.M.DoRotX(0.0);
             pose_.M.DoRotY(0.0);
             pose_.M.DoRotZ(0.0);
@@ -103,9 +115,11 @@ class CommandServer {
                 pose_.p(0) = goal->qd.at(i);
                 pose_.p(1) = goal->qd_dot.at(i);
                 pose_.p(2) = goal->qd_ddot.at(i); 
-                ROS_INFO("%f",  goal->qd_ddot.at(i));
                 // rotations     
                 pose_.M = pose_.M.RPY(goal->x_rot.at(i), goal->y_rot.at(i), goal->z_rot.at(i));
+                //pose_.M.DoRotX(goal->x_rot.at(i));
+                //pose_.M.DoRotY(goal->y_rot.at(i));
+                //pose_.M.DoRotZ(goal->z_rot.at(i));
                 commands_task_space.push_back(pose_);
             }   
 
@@ -503,7 +517,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
             J_trans_.data = J_.data.transpose();
             //Vcmd_ = Vd_ + 2.5*Xerr_;
             
-            Vcmd_ = 2.5*Xerr_;
+            Vcmd_ = 5.0*Xerr_;
             //inv_solver_->CartToJnt(q_, Vcmd_, Vcmd_jnt_);
             for (size_t i = 0; i < n_joints_; i++) {
                 Vcmd_jnt_.data[i] = Vcmd_[i];
@@ -512,6 +526,8 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
             MatrixXd I = MatrixXd::Identity(n_joints_, n_joints_);
             
             float det = J_.data.determinant();
+
+            // check for the singulatities
             if (-0.00001 < det && det < 0.00001) {
                 J_temp_.data = (J_.data * J_trans_.data + 0.2 * I);
                 q_dot_cmd_.data = J_trans_.data * J_temp_.data.inverse() * Vcmd_jnt_.data;
@@ -621,6 +637,14 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         SaveData_[46] = e_int_(3);
         SaveData_[47] = e_int_(4);
         SaveData_[48] = e_int_(5);
+
+        // error in the task space
+        SaveData_[43] = Xerr_(0);
+        SaveData_[44] = Xerr_(1);
+        SaveData_[45] = Xerr_(2);
+        SaveData_[46] = Xerr_(3);
+        SaveData_[47] = Xerr_(4);
+        SaveData_[48] = Xerr_(5);
 
         // 2
         msg_qd_.data.clear();

@@ -113,11 +113,7 @@ class trajectory_planner {
                     }
                 }
 
-                bool loop;
-                ROS_INFO("should trajectory be looped?");
-                ROS_INFO("loop: true or false");
-                std::cin >> loop;
-                goal.loop = loop;
+                goal.loop = false;
                 goal.task_space = false;
             }
 
@@ -135,9 +131,16 @@ class trajectory_planner {
                 ROS_INFO("Give pose z:");
                 std::cin >> c;
                 goal.qd_ddot.push_back(c); // ee z
-                goal.x_rot.push_back(0.0);
-                goal.y_rot.push_back(0.0);
-                goal.z_rot.push_back(0.0);
+                ROS_INFO("give rotation around x:");
+                std::cin >> c;
+                goal.x_rot.push_back(c);
+                ROS_INFO("give rotation around y:");
+                std::cin >> c;
+                goal.y_rot.push_back(c);
+                ROS_INFO("give rotation around z:");
+                std::cin >> c;
+                goal.z_rot.push_back(c);
+
                 goal.task_space = true;
                 goal.loop = false;
             }
@@ -154,6 +157,9 @@ class trajectory_planner {
                 goal.qd.clear();
                 goal.qd_dot.clear();
                 goal.qd_ddot.clear();
+                goal.x_rot.clear();
+                goal.y_rot.clear();
+                goal.z_rot.clear();
                 return true;
             }
             else
@@ -161,6 +167,9 @@ class trajectory_planner {
                 goal.qd.clear();
                 goal.qd_dot.clear();
                 goal.qd_ddot.clear();
+                goal.x_rot.clear();
+                goal.y_rot.clear();
+                goal.z_rot.clear();
                 return true;
             //exit
             
