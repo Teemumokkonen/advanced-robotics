@@ -6,6 +6,9 @@
   <xacro:include filename="$(find elfin_description)/urdf/elfin_robot.gazebo" />
   
   <xacro:include filename="$(find elfin_description)/urdf/elfin_transmission.xacro" />
+
+  <xacro:include filename="$(find elfin_description)/urdf/camera.xacro" />
+  
   
   <xacro:property name="PI" value="3.1415926535897931"/>
   
@@ -397,6 +400,7 @@
       </geometry>
     </collision>
   </link>
+  
   <joint
     name="elfin_joint6"
     type="revolute">
