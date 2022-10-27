@@ -54,7 +54,10 @@
   <build_depend>angles</build_depend>
   <build_depend>kdl_parser</build_depend>
   <build_depend>command_msgs</build_depend>
+  <build_depend>realtime_tools</build_depend>
+  <build_depend>dynamic_reconfigure</build_depend>
   <build_export_depend>roscpp</build_export_depend>
+  
 
 
   <exec_depend>roscpp</exec_depend>
@@ -62,6 +65,8 @@
   <exec_depend>angles</exec_depend>
   <exec_depend>kdl_parser</exec_depend>
   <exec_depend>command_msgs</exec_depend>
+  <exec_depend>realtime_tools</exec_depend>
+  <exec_depend>dynamic_reconfigure</exec_depend>
   <!-- The export tag contains other, unspecified, tags -->
   <export>
     <!-- Other tools can request additional information be placed here -->
