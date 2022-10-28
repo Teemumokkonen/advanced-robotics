@@ -95,18 +95,18 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
         for (size_t i = 0; i < n_joints_; i++)
         {
             std::string si = boost::lexical_cast<std::string>(i + 1);
-            if (n.getParam("/elfin/computed_velocity_controller/gains/elfin_joint" + si + "/pid/p", Kp[i]))
+            if (n.getParam("/elfin/cvc/gains/elfin_joint" + si + "/pid/p", Kp[i]))
             {
                 Kp_(i) = Kp[i];
             }
             else
             {
-                std::cout << "/elfin/computed_velocity_controller/gains/elfin_joint" + si + "/pid/p" << std::endl;
+                std::cout << "/elfin/cVc/gains/elfin_joint" + si + "/pid/p" << std::endl;
                 ROS_ERROR("Cannot find pid/p gain");
                 return false;
             }
 
-            if (n.getParam("/elfin/computed_velocity_controller/gains/elfin_joint" + si + "/pid/i", Ki[i]))
+            if (n.getParam("/elfin/cvc/gains/elfin_joint" + si + "/pid/i", Ki[i]))
             {
                 Ki_(i) = Ki[i];
             }
@@ -116,7 +116,7 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
                 return false;
             }
 
-            if (n.getParam("/elfin/computed_velocity_controller/gains/elfin_joint" + si + "/pid/d", Kd[i]))
+            if (n.getParam("/elfin/cvc/gains/elfin_joint" + si + "/pid/d", Kd[i]))
             {
                 Kd_(i) = Kd[i];
             }
