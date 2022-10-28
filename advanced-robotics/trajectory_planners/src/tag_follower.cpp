@@ -41,7 +41,7 @@ class trajectory_planner {
             // init the action client
             pose_subs_ = n.subscribe<std_msgs::Float64MultiArray>("elfin/cvc/q", 1000, &trajectory_planner::pose_callback, this);
             target_pose_subs_ = n.subscribe<geometry_msgs::TransformStamped>("aruco_single/transform", 1000, &trajectory_planner::target_pose_callback, this);
-            
+            twist_error_pub_ = n.advertise<geometry_msgs::Twist>("Xerr_", 1000);
             vel_pub_ = n.advertise<geometry_msgs::Twist>("/elfin/cvc/command/test", 1000);
 
             n_joints_ = 6;
@@ -126,38 +126,46 @@ class trajectory_planner {
             xd_.M.DoRotY(0.0);
             xd_.M.DoRotZ(0.0);
         }
+
         void pose_callback(const std_msgs::Float64MultiArrayConstPtr &msg) {
         for (int i = 0; i < n_joints_; i++)
         {
             q_(i) = msg->data[i];
-        }   
+        }
+
         fk_pos_solver_->JntToCart(q_, x_); // end effector poss 
         calc_diff();
         }
 
         void target_pose_callback(const geometry_msgs::TransformStampedConstPtr &msg) {
-            ROS_INFO("got target");
-            xd_.p(0) = msg->transform.translation.x;
-            xd_.p(1) = msg->transform.translation.y;
-            xd_.p(2) = msg->transform.translation.z;
-            xd_.M = xd_.M.RPY(00.0, 0.0, 0.0);
-            //xd_.M = xd_.M.Quaternion(msg->transform.rotation.x, msg->transform.rotation.y, msg->transform.rotation.z, msg->transform.rotation.w);
+            ROS_INFO("Found tag");
+            xd_.p(0) = msg->transform.translation.x + 0.1;
+            if (msg->transform.translation.y > 0) {
+                xd_.p(1) = msg->transform.translation.y - 0.25; // back away from frame
+            } 
 
-            ROS_INFO("target frame x %f", xd_.p(0));
-            ROS_INFO("target frame y %f", xd_.p(1));
-            ROS_INFO("target frame z %f", xd_.p(2));
+            else {
+                xd_.p(1) = msg->transform.translation.y + 0.25; // back away from frame
+            }
+            xd_.p(2) = msg->transform.translation.z; // keep the frame height same as for the tag
+            //xd_.M = xd_.M.RPY(0.0, 0.0, 0.0);
+            xd_.M = xd_.M.Quaternion(msg->transform.rotation.x, msg->transform.rotation.y, msg->transform.rotation.z, msg->transform.rotation.w);
+            xd_.M.DoRotX(1.57); // rotate target frame to be in same orientation according to ENU
+
+            // move frame to have little dist from tag
+
         }
 
         void calc_diff() {
-            Xerr_.rot = diff(x_.M, xd_.M) / t_;
-            Xerr_.vel = diff(x_.p, xd_.p) / t_;
+            Xerr_.rot = 5 * diff(x_.M, xd_.M) / t_;
+            Xerr_.vel = 10 * diff(x_.p, xd_.p) / t_;
 
             //Xerr_ = diff(x_, xd_) / t_; // error from the frame
             jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
             J_inv_.data = J_.data.inverse(); // inverse of the jacobian 
             J_trans_.data = J_.data.transpose();
             //Vcmd_ = Vd_ + 2.5*Xerr_;
-            Vcmd_ = 5.0*Xerr_;
+            Vcmd_ = Xerr_;
             //inv_solver_->CartToJnt(q_, Vcmd_, Vcmd_jnt_);
             for (size_t i = 0; i < n_joints_; i++) {
                 Vcmd_jnt_.data[i] = Vcmd_[i];
@@ -165,19 +173,13 @@ class trajectory_planner {
             Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n_joints_, n_joints_);
             float det = J_.data.determinant();
             // check for the singulatities
-            ROS_INFO("test");
             if (-0.00001 < det && det < 0.00001) {
-                ROS_INFO("test nonsingular");
                 J_temp_.data = (J_.data * J_trans_.data + 0.2 * I);
-                ROS_INFO("test ryys");
                 q_dot_cmd_.data = J_trans_.data * J_temp_.data.inverse() * Vcmd_jnt_.data;
-                ROS_INFO("test");
             }
             else {
-                ROS_INFO("test singular");
                 q_dot_cmd_.data = J_inv_.data * Vcmd_jnt_.data;
             }
-            ROS_INFO("test");
 
             twist_msgs_.linear.x = q_dot_cmd_(0);
             twist_msgs_.linear.y = q_dot_cmd_(1);
@@ -187,17 +189,46 @@ class trajectory_planner {
             twist_msgs_.angular.y = q_dot_cmd_(4);
             twist_msgs_.angular.z = q_dot_cmd_(5);
 
+            if (print_state == 100) {
+
+                ROS_INFO("\r");
+
+                ROS_INFO("target frame x %f", xd_.p(0));
+                ROS_INFO("target frame y %f", xd_.p(1));
+                ROS_INFO("target frame z %f", xd_.p(2));
+
+                ROS_INFO("current frame x %f", x_.p(0));
+                ROS_INFO("current frame y %f", x_.p(1));
+                ROS_INFO("current frame z %f", x_.p(2));
+                print_state = 0;
+            }
+            else {
+                print_state++;
+            }
             vel_pub_.publish(twist_msgs_);
+            publish_err();
+        }
+
+        void publish_err() {
+            twist_err_msgs_.linear.x = Xerr_(0);
+            twist_err_msgs_.linear.y = Xerr_(1);
+            twist_err_msgs_.linear.z = Xerr_(2);
+            twist_err_msgs_.angular.x = Xerr_(3);
+            twist_err_msgs_.angular.y = Xerr_(4);
+            twist_err_msgs_.angular.z = Xerr_(5);
+            
+            twist_error_pub_.publish(twist_err_msgs_);
         }
 
     private:
-    
+        int print_state = 0;
         KDL::Twist Vcmd_;
         boost::scoped_ptr<KDL::ChainFkSolverPos_recursive> fk_pos_solver_;
         boost::scoped_ptr<KDL::ChainJntToJacSolver> jnt_to_jac_solver_; // solver for jacobian
         ros::Subscriber pose_subs_;
         ros::Subscriber target_pose_subs_;
         ros::Publisher vel_pub_;
+        ros::Publisher twist_error_pub_;
         KDL::Frame x_; // end effector frame
         KDL::Frame xd_; // end effector frame
         actionlib::SimpleActionClient<command_msgs::planAction> *ac;
@@ -213,8 +244,9 @@ class trajectory_planner {
         KDL::Jacobian J_;
         KDL::Jacobian J_inv_;
         KDL::Jacobian J_trans_;
-         KDL::Jacobian J_temp_;
+        KDL::Jacobian J_temp_;
         geometry_msgs::Twist twist_msgs_;
+        geometry_msgs::Twist twist_err_msgs_;
 };
 
 };
