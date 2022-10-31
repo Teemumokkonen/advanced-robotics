@@ -153,14 +153,14 @@ class trajectory_planner {
 
             xd_ = x_ * xd_; // frame from ee-tag to world-tag
             
-            xd_.M.DoRotX(1.571); // rotate target frame to be in same orientation as end effector according to ENU
+            xd_.M.DoRotX(PI/2); // rotate target frame to be in same orientation as end effector according to ENU
 
         }
 
         void calc_diff() {
             //Xerr_.rot = 1.0 * diff(x_.M, xd_.M) / t_;
             //Xerr_.vel = 1.0 * diff(x_.p, xd_.p) / t_
-            Xerr_ = 2.0 * diff(x_, xd_) / t_; // error from the frame
+            Xerr_ =  2.5 * diff(x_, xd_) / t_; // error from the frame
             jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
             J_inv_.data = J_.data.inverse(); // inverse of the jacobian 
             J_trans_.data = J_.data.transpose();
@@ -174,6 +174,7 @@ class trajectory_planner {
             float det = J_.data.determinant();
             // check for the singulatities
             if (-0.00001 < det && det < 0.00001) {
+                ROS_INFO("singular compr");
                 J_temp_.data = (J_.data * J_trans_.data + 0.2 * I);
                 q_dot_cmd_.data = J_trans_.data * J_temp_.data.inverse() * Vcmd_jnt_.data;
             }
@@ -193,13 +194,13 @@ class trajectory_planner {
 
                 ROS_INFO("\r");
 
-                ROS_INFO("target frame x %f", xd_.p(0));
-                ROS_INFO("target frame y %f", xd_.p(1));
-                ROS_INFO("target frame z %f", xd_.p(2));
+                //ROS_INFO("target frame x %f", xd_.p(0));
+                //ROS_INFO("target frame y %f", xd_.p(1));
+                //ROS_INFO("target frame z %f", xd_.p(2));
 
-                ROS_INFO("current frame x %f", x_.p(0));
-                ROS_INFO("current frame y %f", x_.p(1));
-                ROS_INFO("current frame z %f", x_.p(2));
+                //ROS_INFO("current frame x %f", x_.p(0));
+                //ROS_INFO("current frame y %f", x_.p(1));
+                //ROS_INFO("current frame z %f", x_.p(2));
                 print_state = 0;
             }
             else {
