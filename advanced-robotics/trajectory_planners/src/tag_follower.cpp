@@ -138,28 +138,29 @@ class trajectory_planner {
         }
 
         void target_pose_callback(const geometry_msgs::TransformStampedConstPtr &msg) {
+            
+            // make a tag frame 
+            xd_.M = xd_.M.Quaternion(msg->transform.rotation.x, msg->transform.rotation.y, msg->transform.rotation.z, msg->transform.rotation.w);
             xd_.p(0) = msg->transform.translation.x;
             if (msg->transform.translation.y > 0) {
                 xd_.p(1) = msg->transform.translation.y - 0.4; // back away from frame
             } 
-//
             else {
                 xd_.p(1) = msg->transform.translation.y + 0.4; // back away from frame
             }
-            xd_.p(2) = msg->transform.translation.z; // keep the frame height same as for the tag
-            xd_.M = xd_.M.RPY(0.0, 0.0, 0.0);
-            xd_.M = xd_.M.Quaternion(msg->transform.rotation.x, msg->transform.rotation.y, msg->transform.rotation.z, msg->transform.rotation.w);
-            xd_.M.DoRotX(1.571); // rotate target frame to be in same orientation as end effector according to ENU
 
-            // move frame to have little dist from tag
+            xd_.p(2) = msg->transform.translation.z;
+
+            xd_ = x_ * xd_; // frame from ee-tag to world-tag
+            
+            xd_.M.DoRotX(1.571); // rotate target frame to be in same orientation as end effector according to ENU
 
         }
 
         void calc_diff() {
-            Xerr_.rot = 5 * diff(x_.M, xd_.M) / t_;
-            Xerr_.vel = 10 * diff(x_.p, xd_.p) / t_;
-
-            //Xerr_ = diff(x_, xd_) / t_; // error from the frame
+            //Xerr_.rot = 1.0 * diff(x_.M, xd_.M) / t_;
+            //Xerr_.vel = 1.0 * diff(x_.p, xd_.p) / t_
+            Xerr_ = 2.0 * diff(x_, xd_) / t_; // error from the frame
             jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
             J_inv_.data = J_.data.inverse(); // inverse of the jacobian 
             J_trans_.data = J_.data.transpose();
@@ -238,7 +239,7 @@ class trajectory_planner {
         double t = 0.0;
         KDL::Chain kdl_chain_; // chain of the kinematic tree
         KDL::Tree kdl_tree_;   // kinematic tree based of the model urdf downloaded from the parameter server
-        float t_ = 1.0;
+        float t_ = 0.5;
         KDL::Twist Xerr_;
         KDL::Jacobian J_;
         KDL::Jacobian J_inv_;
