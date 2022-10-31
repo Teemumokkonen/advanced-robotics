@@ -148,6 +148,8 @@ target_link_libraries(
   ${catkin_LIBRARIES}
 )
 
+install(DIRECTORY launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
 
 
 ## Add cmake target dependencies of the library
