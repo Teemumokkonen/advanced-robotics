@@ -194,13 +194,13 @@ class trajectory_planner {
 
                 ROS_INFO("\r");
 
-                //ROS_INFO("target frame x %f", xd_.p(0));
-                //ROS_INFO("target frame y %f", xd_.p(1));
-                //ROS_INFO("target frame z %f", xd_.p(2));
-
-                //ROS_INFO("current frame x %f", x_.p(0));
-                //ROS_INFO("current frame y %f", x_.p(1));
-                //ROS_INFO("current frame z %f", x_.p(2));
+                ROS_INFO("target frame x %f", xd_.p(0));
+                ROS_INFO("target frame y %f", xd_.p(1));
+                ROS_INFO("target frame z %f", xd_.p(2));
+                
+                ROS_INFO("current frame x %f", x_.p(0));
+                ROS_INFO("current frame y %f", x_.p(1));
+                ROS_INFO("current frame z %f", x_.p(2));
                 print_state = 0;
             }
             else {
