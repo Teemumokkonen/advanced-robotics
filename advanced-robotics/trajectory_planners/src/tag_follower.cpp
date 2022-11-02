@@ -134,53 +134,99 @@ class trajectory_planner {
         }
 
         fk_pos_solver_->JntToCart(q_, x_); // end effector poss 
-        calc_diff();
+        if (detection == false) {
+            calc_diff();
+        }
         }
 
         void target_pose_callback(const geometry_msgs::TransformStampedConstPtr &msg) {
-            
+            detection = true;
             // make a tag frame 
             xd_.M = xd_.M.Quaternion(msg->transform.rotation.x, msg->transform.rotation.y, msg->transform.rotation.z, msg->transform.rotation.w);
             xd_.p(0) = msg->transform.translation.x;
-            if (msg->transform.translation.y > 0) {
-                xd_.p(1) = msg->transform.translation.y - 0.4; // back away from frame
-            } 
-            else {
-                xd_.p(1) = msg->transform.translation.y + 0.4; // back away from frame
-            }
-
+            xd_.p(1) = msg->transform.translation.y; // back away from frame
             xd_.p(2) = msg->transform.translation.z;
 
-            xd_ = x_ * xd_; // frame from ee-tag to world-tag
-            
+            //xd_ = x_ * xd_; // frame from ee-tag to world-tag
             xd_.M.DoRotX(PI/2); // rotate target frame to be in same orientation as end effector according to ENU
-
+            calc_diff();
         }
 
         void calc_diff() {
             //Xerr_.rot = 1.0 * diff(x_.M, xd_.M) / t_;
             //Xerr_.vel = 1.0 * diff(x_.p, xd_.p) / t_
-            Xerr_ =  2.5 * diff(x_, xd_) / t_; // error from the frame
-            jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
-            J_inv_.data = J_.data.inverse(); // inverse of the jacobian 
-            J_trans_.data = J_.data.transpose();
 
-            Vcmd_ = Xerr_;
-            //inv_solver_->CartToJnt(q_, Vcmd_, Vcmd_jnt_);
-            for (size_t i = 0; i < n_joints_; i++) {
-                Vcmd_jnt_.data[i] = Vcmd_[i];
-            }
-            Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n_joints_, n_joints_);
-            float det = J_.data.determinant();
-            // check for the singulatities
-            if (-0.00001 < det && det < 0.00001) {
-                ROS_INFO("singular compr");
-                J_temp_.data = (J_.data * J_trans_.data + 0.2 * I);
-                q_dot_cmd_.data = J_trans_.data * J_temp_.data.inverse() * Vcmd_jnt_.data;
+            if (detection == false) {
+                Xerr_ =  2.5 * diff(x_, xd_) / t_; // error from the frame
+                jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
+                J_inv_.data = J_.data.inverse(); // inverse of the jacobian 
+                J_trans_.data = J_.data.transpose();
+
+                Vcmd_ = Xerr_;
+                //inv_solver_->CartToJnt(q_, Vcmd_, Vcmd_jnt_);
+                for (size_t i = 0; i < n_joints_; i++) {
+                    Vcmd_jnt_.data[i] = Vcmd_[i];
+                }
+                Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n_joints_, n_joints_);
+                float det = J_.data.determinant();
+                // check for the singulatities
+                if (-0.00001 < det && det < 0.00001) {
+
+                    J_temp_.data = (J_.data * J_trans_.data + 0.2 * I);
+                    q_dot_cmd_.data = J_trans_.data * J_temp_.data.inverse() * Vcmd_jnt_.data;
+                }
+                else {
+                    q_dot_cmd_.data = J_inv_.data * Vcmd_jnt_.data;
+                }
             }
             else {
+                xd_ref = xd_;
+                xd_ref.p(0) = 0.0;
+                xd_ref.p(1) = -0.4;
+                xd_ref.p(2) = 0.0;
+                ROS_INFO("\n");
+                ROS_INFO("des x: %f", xd_ref.p(0));
+                ROS_INFO("des y: %f", xd_ref.p(1));
+                ROS_INFO("des z: %f", xd_ref.p(2));
+
+                ROS_INFO("cur x: %f", xd_.p(0));
+                ROS_INFO("cur y: %f", xd_.p(1));
+                ROS_INFO("cur z: %f", xd_.p(2));
+
+
+                xd_ref.p = xd_ref.p - xd_.p;
+
+                ROS_INFO("err x: %f", xd_ref.p(0));
+                ROS_INFO("err y: %f", xd_ref.p(1));
+                ROS_INFO("err z: %f", xd_ref.p(2));
+                KDL::Vector u_temp;
+                KDL::Vector vc;
+                KDL::Vector wc;
+                //u_temp(0) = xd_ref.M.data[7] - xd_ref.M.data[5];
+                //u_temp(1) = xd_ref.M.data[2] - xd_ref.M.data[6];
+                //u_temp(2) = xd_ref.M.data[3] - xd_ref.M.data[1];
+
+                float theta = acos((xd_ref.M.data[0] + xd_ref.M.data[4] + xd_ref.M.data[8] - 1) / 2);
+                u_temp(0) = xd_ref.M.data[5] - xd_ref.M.data[7];
+                u_temp(1) = xd_ref.M.data[6] - xd_ref.M.data[2];
+                u_temp(2) = xd_ref.M.data[1] - xd_ref.M.data[3];
+                KDL::Vector u = (1/(2*sin(theta)))*u_temp;
+
+                vc = -3.0 * (xd_ref.M.Inverse() * xd_ref.p);
+                wc = -1.5 * theta * u;
+
+                Vcmd_jnt_.data(0) = vc(0);
+                Vcmd_jnt_.data(1) = vc(1);
+                Vcmd_jnt_.data(2) = vc(2);
+                Vcmd_jnt_.data(3) = wc(0);
+                Vcmd_jnt_.data(4) = wc(1);
+                Vcmd_jnt_.data(5) = wc(2);
+
                 q_dot_cmd_.data = J_inv_.data * Vcmd_jnt_.data;
             }
+
+
+
 
             twist_msgs_.linear.x = q_dot_cmd_(0);
             twist_msgs_.linear.y = q_dot_cmd_(1);
@@ -231,7 +277,7 @@ class trajectory_planner {
         ros::Publisher vel_pub_;
         ros::Publisher twist_error_pub_;
         KDL::Frame x_; // end effector frame
-        KDL::Frame xd_; // end effector frame
+        KDL::Frame xd_, xd_ref; // end effector frame
         actionlib::SimpleActionClient<command_msgs::planAction> *ac;
         std::vector<std::string> joint_names_;
         unsigned int n_joints_;
@@ -248,6 +294,7 @@ class trajectory_planner {
         KDL::Jacobian J_temp_;
         geometry_msgs::Twist twist_msgs_;
         geometry_msgs::Twist twist_err_msgs_;
+        bool detection = false;
 };
 
 };
