@@ -6,9 +6,6 @@
   <xacro:include filename="$(find elfin_description)/urdf/elfin_robot.gazebo" />
   
   <xacro:include filename="$(find elfin_description)/urdf/elfin_transmission.xacro" />
-
-  <xacro:include filename="$(find elfin_description)/urdf/camera.xacro" />
-  
   
   <xacro:property name="PI" value="3.1415926535897931"/>
   
@@ -43,7 +40,7 @@
         xyz="-0.0319402056221453 0.427120668618383 -5.39351164605318E-06"
         rpy="0 0 0" />
       <mass
-        value="4.3052612459755" />
+        value="0.0268461773395224" />
       <inertia
         ixx="0.291480854811486"
         ixy="-0.00222433961096429"
@@ -370,7 +367,7 @@
         xyz="0.0219175619250529 0.461879324434722 -0.0232335370431645"
         rpy="0 0 0" />
       <mass
-        value="4.3052612459755" />
+        value="0.11342880515576" />
       <inertia
         ixx="0.294935032119192"
         ixy="-0.0015239945221609"
@@ -400,7 +397,6 @@
       </geometry>
     </collision>
   </link>
-  
   <joint
     name="elfin_joint6"
     type="revolute">
