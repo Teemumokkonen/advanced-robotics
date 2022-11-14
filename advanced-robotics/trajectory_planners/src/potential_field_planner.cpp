@@ -136,10 +136,10 @@ class trajectory_planner {
 
         // initial pose for robot to match
         void init_pose() {
-            xd_.p(0) = 0.1;
-            xd_.p(1) = -0.1;
+            xd_.p(0) = -0.3;
+            xd_.p(1) = -0.2;
             xd_.p(2) = 0.5; 
-            xd_.M = xd_.M.RPY(0.0, 0.0, 0.0);
+            xd_.M = xd_.M.RPY(0.0, 0.0, 0.1);
         }
 
         void pose_callback(const std_msgs::Float64MultiArrayConstPtr &msg) {
@@ -157,7 +157,7 @@ class trajectory_planner {
             // make a tag frame 
             xd_.M = xd_.M.Quaternion(msg->transform.rotation.x, msg->transform.rotation.y, msg->transform.rotation.z, msg->transform.rotation.w);
             xd_.p(0) = msg->transform.translation.x;
-            xd_.p(1) = msg->transform.translation.y; // back away from frame
+            xd_.p(1) = msg->transform.translation.y; 
             xd_.p(2) = msg->transform.translation.z;
 
             //xd_ = x_ * xd_; // frame from ee-tag to world-tag
@@ -165,11 +165,11 @@ class trajectory_planner {
         }
 
         void calc_diff() {
-            //Xerr_.rot = 10.0 * diff(x_.M, xd_.M) / t_;
-            //Xerr_.vel = 10.0 * diff(x_.p, xd_.p) / t_;
+            Xerr_.rot = 5.0 * diff(x_.M, xd_.M) / t_;
+            Xerr_.vel = 10.0 * diff(x_.p, xd_.p) / t_;
 
 
-            Xerr_ =  5.0 * diff(x_, xd_) / t_; // error from the frame
+            //Xerr_ =  15.0 * diff(x_, xd_) / t_; // error from the frame
             jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
             J_inv_.data = J_.data.inverse(); // inverse of the jacobian 
             J_trans_.data = J_.data.transpose();
@@ -182,10 +182,10 @@ class trajectory_planner {
             Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n_joints_, n_joints_);
             float det = J_.data.determinant();
             // check for the singulatities
-            if (-0.00001 < det && det < 0.00001) {
+            if (-0.00003 < det && det < 0.00003) {
                 ROS_INFO("Singularity detected");
 
-                J_temp_.data = (J_.data * J_trans_.data + 0.4 * I);
+                J_temp_.data = (J_.data * J_trans_.data + 0.05 * I);
                 q_dot_cmd_.data = J_trans_.data * J_temp_.data.inverse() * Vcmd_jnt_.data;
             }
             else {
@@ -193,8 +193,8 @@ class trajectory_planner {
             }
 
 
-            J_temp_.data = (J_.data * J_trans_.data + 0.1 * I);
-            q_dot_cmd_.data = J_trans_.data * J_temp_.data.inverse() * Vcmd_jnt_.data;
+            //J_temp_.data = (J_.data * J_trans_.data + 0.1 * I);
+            //q_dot_cmd_.data = J_trans_.data * J_temp_.data.inverse() * Vcmd_jnt_.data;
         
 
             KDL::JntArray q = rep_potential();
