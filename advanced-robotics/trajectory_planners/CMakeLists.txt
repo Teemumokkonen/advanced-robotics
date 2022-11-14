@@ -137,6 +137,7 @@ include_directories(
 ## The recommended prefix ensures that target names across packages don't collide
 add_executable(straight_line_planner_node src/straight_line_planner.cpp)
 add_executable(tag_follower_node src/tag_follower.cpp)
+add_executable(dynamic_obs_avoid_node src/potential_field_planner.cpp)
 ## Specify libraries to link a library or executable target against
 target_link_libraries(
   straight_line_planner_node
@@ -147,6 +148,12 @@ target_link_libraries(
   tag_follower_node
   ${catkin_LIBRARIES}
 )
+
+target_link_libraries(
+  dynamic_obs_avoid_node
+  ${catkin_LIBRARIES}
+)
+
 
 install(DIRECTORY launch
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})

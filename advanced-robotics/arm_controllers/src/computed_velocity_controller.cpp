@@ -679,6 +679,7 @@ class ComputedVelocityController : public controller_interface::Controller<hardw
         static int count = 0;
         if (count > 99)
         {
+            
             printf("*********************************************************\n\n");
             printf("*** Simulation Time (unit: sec)  ***\n");
             printf("t = %f\n", t);
