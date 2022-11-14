@@ -125,7 +125,7 @@ class trajectory_planner {
 
             KDL::Vector obs_point;
             obs_point(0) = 0.0; //x
-            obs_point(1) = -0.3;  //y
+            obs_point(1) = -0.45;  //y
             obs_point(2) = 0.2; //z
             obs_points_.push_back(obs_point);
             obs_point(2) = 0.5; //z
@@ -199,7 +199,7 @@ class trajectory_planner {
             //q_dot_cmd_.data = J_trans_.data * J_temp_.data.inverse() * Vcmd_jnt_.data;
         
 
-            KDL::JntArray q = rep_potential();
+            KDL::JntArray q = rep_potential_end_effector();
 
             if (print_state == 100) {
 
@@ -261,7 +261,7 @@ class trajectory_planner {
             twist_error_pub_.publish(twist_err_msgs_);
         }
 
-        KDL::JntArray rep_potential(){
+        KDL::JntArray rep_potential_end_effector(){
             KDL::JntArray q_dot_cmd_rep;
             float min_dist = 1000000;// init to high value
             int min_obs_point = 0;
@@ -273,7 +273,7 @@ class trajectory_planner {
                     min_obs_point = i;
                 }
             }
-            float q = 0.20; 
+            float q = 0.25; 
             KDL::JntArray p;
             p.data = Eigen::VectorXd::Zero(n_joints_);
 
@@ -287,7 +287,7 @@ class trajectory_planner {
                 p(5) = 0.0;
             }
             else {
-                float k = 0.5;
+                float k = 1.0;
                 p(0) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x_.p(0) - obs_points_.at(min_obs_point)(0))/min_dist); 
                 p(1) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x_.p(1) - obs_points_.at(min_obs_point)(1))/min_dist); 
                 p(2) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x_.p(2) - obs_points_.at(min_obs_point)(2))/min_dist);

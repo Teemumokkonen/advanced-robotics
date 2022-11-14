@@ -17,7 +17,7 @@ def talker():
     pose = Pose()
 
     pose.position.x = 0.0
-    pose.position.y = -1.2
+    pose.position.y = -1.3
     pose.position.z = 0.5
 
     quaternion = tf.transformations.quaternion_from_euler(0, 1.571, 1.571)
