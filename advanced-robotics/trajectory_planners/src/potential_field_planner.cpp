@@ -25,6 +25,8 @@
 #include <Eigen/LU>
 #include <Eigen/SVD>
 
+#include <math.h>
+
 #define A 0.1
 #define PI 3.141592
 #define D2R PI / 180.0
@@ -123,10 +125,10 @@ class trajectory_planner {
 
             KDL::Vector obs_point;
             obs_point(0) = 0.0; //x
-            obs_point(1) = -0.6;  //y
+            obs_point(1) = -0.3;  //y
             obs_point(2) = 0.2; //z
             obs_points_.push_back(obs_point);
-            obs_point(2) = 0.4; //z
+            obs_point(2) = 0.5; //z
             obs_points_.push_back(obs_point);
             obs_point(2) = 0.6; //z
             obs_points_.push_back(obs_point);
@@ -165,8 +167,8 @@ class trajectory_planner {
         }
 
         void calc_diff() {
-            Xerr_.rot = 5.0 * diff(x_.M, xd_.M) / t_;
-            Xerr_.vel = 10.0 * diff(x_.p, xd_.p) / t_;
+            Xerr_.rot = 10.0 * diff(x_.M, xd_.M) / t_;
+            Xerr_.vel = 15.0 * diff(x_.p, xd_.p) / t_;
 
 
             //Xerr_ =  15.0 * diff(x_, xd_) / t_; // error from the frame
@@ -182,8 +184,8 @@ class trajectory_planner {
             Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n_joints_, n_joints_);
             float det = J_.data.determinant();
             // check for the singulatities
-            if (-0.00003 < det && det < 0.00003) {
-                ROS_INFO("Singularity detected");
+            if (-0.00001 < det && det < 0.00001) {
+                //ROS_INFO("Singularity detected");
 
                 J_temp_.data = (J_.data * J_trans_.data + 0.05 * I);
                 q_dot_cmd_.data = J_trans_.data * J_temp_.data.inverse() * Vcmd_jnt_.data;
@@ -264,16 +266,17 @@ class trajectory_planner {
             float min_dist = 1000000;// init to high value
             int min_obs_point = 0;
             for (int i = 0; i < obs_points_.size(); i++) {
-                float dist = sqrt(pow(obs_points_.at(i)(0) + x_.p(0), 2) + pow(obs_points_.at(i)(1) + x_.p(1), 2) + pow(obs_points_.at(i)(1) + x_.p(1), 2));
+                float dist = sqrt(pow(obs_points_.at(i)(0) - x_.p(0), 2) + pow(obs_points_.at(i)(1) - x_.p(1), 2) + pow(obs_points_.at(i)(1) - x_.p(1), 2));
 
                 if (dist < min_dist) {
                     min_dist = dist;
                     min_obs_point = i;
                 }
             }
-            float q = 0.10; 
+            float q = 0.20; 
             KDL::JntArray p;
             p.data = Eigen::VectorXd::Zero(n_joints_);
+
 
             if (min_dist > q) {
                 p(0) = 0.0;
@@ -284,7 +287,7 @@ class trajectory_planner {
                 p(5) = 0.0;
             }
             else {
-                float k = 0.0;
+                float k = 0.5;
                 p(0) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x_.p(0) - obs_points_.at(min_obs_point)(0))/min_dist); 
                 p(1) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x_.p(1) - obs_points_.at(min_obs_point)(1))/min_dist); 
                 p(2) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x_.p(2) - obs_points_.at(min_obs_point)(2))/min_dist);

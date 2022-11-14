@@ -5,7 +5,7 @@
   <!-- Robot Model -->
   <param name="robot_description" command="$(find xacro)/xacro --inorder '$(find elfin_description)/urdf/elfin3.urdf.xacro'" />
       
-  <node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" respawn="false" output="screen" args="-urdf -model elfin3 -param robot_description -J elfin_joint1 0.5 -J elfin_joint2 0.2 -J elfin_joint3 0.5 -J elfin_joint4 0.5 -J elfin_joint5 -0.0806423 -J elfin_joint6 -0.0620532"/>
+  <node name="urdf_spawner" pkg="gazebo_ros" type="spawn_model" respawn="false" output="screen" args="-urdf -model elfin3 -param robot_description -J elfin_joint1 0.0 -J elfin_joint2 0.5 -J elfin_joint3 0.5 -J elfin_joint4 0.5 -J elfin_joint5 -0.5 -J elfin_joint6 -0.0620532"/>
 
   <!-- Controller: 
       - gravity_comp_controller

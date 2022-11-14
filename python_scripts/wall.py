@@ -31,7 +31,7 @@ def talker():
     spawn_model_client = rospy.ServiceProxy('/gazebo/spawn_sdf_model', SpawnModel)
     spawn_model_client(
     model_name='obs_wall',
-        model_xml=open('/home/localadmin/.gazebo/models/wall/wall.sdf', 'r').read(),
+        model_xml=open('models/wall.sdf', 'r').read(),
         robot_namespace='/foo',
         initial_pose=pose,
         reference_frame='world'
