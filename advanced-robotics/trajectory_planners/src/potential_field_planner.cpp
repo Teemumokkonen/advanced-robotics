@@ -16,6 +16,7 @@
 #include <kdl_parser/kdl_parser.hpp>
 #include <kdl/chaindynparam.hpp>              // inverse dynamics
 #include <kdl/chainjnttojacsolver.hpp> 
+#include <kdl/treejnttojacsolver.hpp>
 #include <kdl/chainfksolverpos_recursive.hpp>
 #include <kdl/chainiksolvervel_pinv.hpp>
 
@@ -108,6 +109,7 @@ class trajectory_planner {
             }
 
             J_.resize(kdl_chain_.getNrOfJoints());
+            J2_.resize(1);
             J_inv_.resize(kdl_chain_.getNrOfJoints());
             J_temp_.resize(kdl_chain_.getNrOfJoints());
             J_trans_.resize(kdl_chain_.getNrOfJoints());
@@ -115,6 +117,8 @@ class trajectory_planner {
             q_dot_cmd_.data = Eigen::VectorXd::Zero(n_joints_);
             fk_pos_solver_.reset(new KDL::ChainFkSolverPos_recursive(kdl_chain_));
             jnt_to_jac_solver_.reset(new KDL::ChainJntToJacSolver(kdl_chain_));
+        
+            TreeJntToJacSolver_.reset(new KDL::TreeJntToJacSolver(kdl_tree_));
             init_pose();
             init_obs();
             return true;
@@ -150,7 +154,50 @@ class trajectory_planner {
             q_(i) = msg->data[i];
         }
 
+        fk_pos_solver_->JntToCart(q_, x_2_, 3);
+        fk_pos_solver_->JntToCart(q_, x_3_, 4);
+        fk_pos_solver_->JntToCart(q_, x_4_, 5);
+        fk_pos_solver_->JntToCart(q_, x_5_, 6);
+        fk_pos_solver_->JntToCart(q_, x_6_, 7);
         fk_pos_solver_->JntToCart(q_, x_); // end effector poss 
+        
+        FK_vec_[0] = x_;
+        FK_vec_[1] = x_2_;
+        FK_vec_[2] = x_3_;
+        FK_vec_[3] = x_4_;
+        FK_vec_[4] = x_5_;
+        FK_vec_[5] = x_6_;
+
+        //TreeJntToJacSolver_->JntToJac(q_, J2_, "elfin_joint1");
+        //TreeJntToJacSolver_->JntToJac(q_, J3_, "elfin_joint2");
+        //TreeJntToJacSolver_->JntToJac(q_, J4_, "elfin_joint3");
+        //TreeJntToJacSolver_->JntToJac(q_, J5_, "elfin_joint4");
+        //TreeJntToJacSolver_->JntToJac(q_, J6_, "elfin_joint5");
+        jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
+        jnt_to_jac_solver_->JntToJac(q_, J2_, 3); // jacobian of the joint
+        jnt_to_jac_solver_->JntToJac(q_, J3_, 4); // jacobian of the joint
+        jnt_to_jac_solver_->JntToJac(q_, J4_, 5); // jacobian of the joint
+        jnt_to_jac_solver_->JntToJac(q_, J5_, 6); // jacobian of the joint
+        jnt_to_jac_solver_->JntToJac(q_, J6_, 7); // jacobian of the joint
+
+        //ROS_INFO("current Jac x %f", J2_.data(0));
+        //ROS_INFO("current Jac y %f", J2_.data(1));
+        //ROS_INFO("current Jac z %f", J2_.data(2));
+//
+        //ROS_INFO("current Jac x %f", J3_.data(0));
+        //ROS_INFO("current Jac y %f", J3_.data(1));
+        //ROS_INFO("current Jac z %f", J3_.data(2));
+//
+        //ROS_INFO("current Jac x %f", J4_.data(0));
+        //ROS_INFO("current Jac y %f", J4_.data(1));
+        //ROS_INFO("current Jac z %f", J4_.data(2));
+        Jac_vec_[0] = J_;
+        Jac_vec_[1] = J2_;
+        Jac_vec_[2] = J3_;
+        Jac_vec_[3] = J4_;
+        Jac_vec_[4] = J5_; 
+        Jac_vec_[5] = J6_; 
+
         calc_diff();
         
         }
@@ -172,7 +219,7 @@ class trajectory_planner {
 
 
             //Xerr_ =  15.0 * diff(x_, xd_) / t_; // error from the frame
-            jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
+            
             J_inv_.data = J_.data.inverse(); // inverse of the jacobian 
             J_trans_.data = J_.data.transpose();
 
@@ -200,6 +247,23 @@ class trajectory_planner {
         
 
             KDL::JntArray q = rep_potential_end_effector();
+            //KDL::JntArray q; 
+            //KDL::JntArray q_pot_rep;
+            //q.data = Eigen::VectorXd::Zero(n_joints_);
+
+            //ROS_INFO("test 1");
+            //for (int i = 0; i < FK_vec_.size() ; i++) {
+            //    ROS_INFO("test 2");
+            //    q_pot_rep.data = Eigen::VectorXd::Zero(n_joints_);
+            //    q_pot_rep = rep_potential_sum(FK_vec_.at(i), Jac_vec_.at(i));
+//
+            //    for (int j = 0; j < n_joints_; j++) {
+            //        ROS_INFO("test 3");
+            //        q(j) += q_pot_rep(j);
+            //    }
+//
+            //}
+            //ROS_INFO("test 4");
 
             if (print_state == 100) {
 
@@ -212,6 +276,27 @@ class trajectory_planner {
                 ROS_INFO("current frame x %f", x_.p(0));
                 ROS_INFO("current frame y %f", x_.p(1));
                 ROS_INFO("current frame z %f", x_.p(2));
+
+
+                //ROS_INFO("first link x pose %f", FK_vec_[1].p(0));
+                //ROS_INFO("first link y pose %f", FK_vec_[1].p(1));
+                //ROS_INFO("first link z pose %f", FK_vec_[1].p(2));
+//
+                //ROS_INFO("second link x pose %f", FK_vec_[2].p(0));
+                //ROS_INFO("second link y pose %f", FK_vec_[2].p(1));
+                //ROS_INFO("second link z pose %f", FK_vec_[2].p(2));
+//
+                //ROS_INFO("third link x pose %f", FK_vec_[3].p(0));
+                //ROS_INFO("third link y pose %f", FK_vec_[3].p(1));
+                //ROS_INFO("third link z pose %f", FK_vec_[3].p(2));
+//
+                //ROS_INFO("fourth link x pose %f", FK_vec_[4].p(0));
+                //ROS_INFO("fourth link y pose %f", FK_vec_[4].p(1));
+                //ROS_INFO("fourth link z pose %f", FK_vec_[4].p(2));
+//
+                //ROS_INFO("fifth link x pose %f", FK_vec_[5].p(0));
+                //ROS_INFO("fifth link y pose %f", FK_vec_[5].p(1));
+                //ROS_INFO("fifth link z pose %f", FK_vec_[5].p(2));
 
                 ROS_INFO("\r");
 
@@ -229,6 +314,8 @@ class trajectory_planner {
                 ROS_INFO("attractive joint 4: %f", q_dot_cmd_(0));
                 ROS_INFO("attractive joint 5: %f", q_dot_cmd_(1));
                 ROS_INFO("attractive joint 6: %f", q_dot_cmd_(2));
+
+                
                 print_state = 0;
             }
             else {
@@ -286,6 +373,7 @@ class trajectory_planner {
                 p(4) = 0.0;
                 p(5) = 0.0;
             }
+
             else {
                 float k = 1.0;
                 p(0) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x_.p(0) - obs_points_.at(min_obs_point)(0))/min_dist); 
@@ -301,16 +389,80 @@ class trajectory_planner {
             return q_dot_cmd_rep;
         }
 
+        KDL::JntArray rep_potential_sum(KDL::Frame x, KDL::Jacobian J){
+            ROS_INFO("current frame x %f", x.p(0));
+            ROS_INFO("current frame y %f", x.p(1));
+            ROS_INFO("current frame z %f", x.p(2));
+
+            ROS_INFO("current frame x %f", J.data(0));
+            ROS_INFO("current frame y %f", J.data(1));
+            ROS_INFO("current frame z %f", J.data(2));
+
+            KDL::JntArray q_dot_cmd_rep;
+            float min_dist = 1000000;// init to high value
+            int min_obs_point = 0;
+            for (int i = 0; i < obs_points_.size(); i++) {
+                float dist = sqrt(pow(obs_points_.at(i)(0) - x.p(0), 2) + pow(obs_points_.at(i)(1) - x.p(1), 2) + pow(obs_points_.at(i)(1) - x.p(1), 2));
+
+                if (dist < min_dist) {
+                    min_dist = dist;
+                    min_obs_point = i;
+                }
+            }
+            ROS_INFO("obs found");
+            float q = 0.25; 
+            KDL::JntArray p;
+            p.data = Eigen::VectorXd::Zero(n_joints_);
+
+
+            if (min_dist > q) {
+                p(0) = 0.0;
+                p(1) = 0.0; 
+                p(2) = 0.0;
+                p(3) = 0.0; // don't read rotations 
+                p(4) = 0.0;
+                p(5) = 0.0;
+            }
+
+            else {
+                float k = 1.0;
+                p(0) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x.p(0) - obs_points_.at(min_obs_point)(0))/min_dist); 
+                p(1) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x.p(1) - obs_points_.at(min_obs_point)(1))/min_dist); 
+                p(2) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x.p(2) - obs_points_.at(min_obs_point)(2))/min_dist);
+                p(3) = 0.0; // don't read rotations 
+                p(4) = 0.0;
+                p(5) = 0.0;
+
+            }
+
+            ROS_INFO("pot found");
+
+            q_dot_cmd_rep.data = J.data.transpose() * p.data;
+            ROS_INFO("vel found");
+
+            ROS_INFO("q_pot: %f", q_dot_cmd_rep(0));
+            ROS_INFO("q_pot: %f", q_dot_cmd_rep(1));
+            ROS_INFO("q_pot: %f", q_dot_cmd_rep(2));
+            ROS_INFO("q_pot: %f", q_dot_cmd_rep(3));
+            ROS_INFO("q_pot: %f", q_dot_cmd_rep(4));
+            ROS_INFO("q_pot: %f", q_dot_cmd_rep(5));
+
+            return q_dot_cmd_rep;
+        }
+
     private:
         int print_state = 0;
         KDL::Twist Vcmd_;
         boost::scoped_ptr<KDL::ChainFkSolverPos_recursive> fk_pos_solver_;
         boost::scoped_ptr<KDL::ChainJntToJacSolver> jnt_to_jac_solver_; // solver for jacobian
+        boost::scoped_ptr<KDL::TreeJntToJacSolver> TreeJntToJacSolver_;
         ros::Subscriber pose_subs_;
         ros::Subscriber target_pose_subs_;
         ros::Publisher vel_pub_;
         ros::Publisher twist_error_pub_;
-        KDL::Frame x_; // end effector frame
+        KDL::Frame x_, x_2_, x_3_, x_4_, x_5_, x_6_; // end effector frame
+        std::vector<KDL::Frame> FK_vec_ {x_, x_2_, x_3_, x_4_, x_5_, x_6_};
+
         KDL::Frame xd_, xd_ref; // end effector frame
         actionlib::SimpleActionClient<command_msgs::planAction> *ac;
         std::vector<std::string> joint_names_;
@@ -322,7 +474,8 @@ class trajectory_planner {
         KDL::Tree kdl_tree_;   // kinematic tree based of the model urdf downloaded from the parameter server
         float t_ = 0.7;
         KDL::Twist Xerr_;
-        KDL::Jacobian J_;
+        KDL::Jacobian J_, J2_, J3_, J4_, J5_, J6_;
+        std::vector<KDL::Jacobian> Jac_vec_ {J_, J2_, J3_, J4_, J5_, J6_};
         KDL::Jacobian J_inv_;
         KDL::Jacobian J_trans_;
         KDL::Jacobian J_temp_;
