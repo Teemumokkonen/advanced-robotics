@@ -109,7 +109,12 @@ class trajectory_planner {
             }
 
             J_.resize(kdl_chain_.getNrOfJoints());
-            J2_.resize(1);
+            J2_.resize(6);
+            J3_.resize(6);
+            J4_.resize(6);
+            J5_.resize(6);
+            J6_.resize(6);
+
             J_inv_.resize(kdl_chain_.getNrOfJoints());
             J_temp_.resize(kdl_chain_.getNrOfJoints());
             J_trans_.resize(kdl_chain_.getNrOfJoints());
@@ -168,11 +173,11 @@ class trajectory_planner {
         FK_vec_[4] = x_5_;
         FK_vec_[5] = x_6_;
 
-        //TreeJntToJacSolver_->JntToJac(q_, J2_, "elfin_joint1");
-        //TreeJntToJacSolver_->JntToJac(q_, J3_, "elfin_joint2");
-        //TreeJntToJacSolver_->JntToJac(q_, J4_, "elfin_joint3");
-        //TreeJntToJacSolver_->JntToJac(q_, J5_, "elfin_joint4");
-        //TreeJntToJacSolver_->JntToJac(q_, J6_, "elfin_joint5");
+        TreeJntToJacSolver_->JntToJac(q_, J2_, "elfin_joint1");
+        TreeJntToJacSolver_->JntToJac(q_, J3_, "elfin_joint2");
+        TreeJntToJacSolver_->JntToJac(q_, J4_, "elfin_joint3");
+        TreeJntToJacSolver_->JntToJac(q_, J5_, "elfin_joint4");
+        TreeJntToJacSolver_->JntToJac(q_, J6_, "elfin_joint5");
         jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
         jnt_to_jac_solver_->JntToJac(q_, J2_, 3); // jacobian of the joint
         jnt_to_jac_solver_->JntToJac(q_, J3_, 4); // jacobian of the joint
@@ -180,17 +185,6 @@ class trajectory_planner {
         jnt_to_jac_solver_->JntToJac(q_, J5_, 6); // jacobian of the joint
         jnt_to_jac_solver_->JntToJac(q_, J6_, 7); // jacobian of the joint
 
-        //ROS_INFO("current Jac x %f", J2_.data(0));
-        //ROS_INFO("current Jac y %f", J2_.data(1));
-        //ROS_INFO("current Jac z %f", J2_.data(2));
-//
-        //ROS_INFO("current Jac x %f", J3_.data(0));
-        //ROS_INFO("current Jac y %f", J3_.data(1));
-        //ROS_INFO("current Jac z %f", J3_.data(2));
-//
-        //ROS_INFO("current Jac x %f", J4_.data(0));
-        //ROS_INFO("current Jac y %f", J4_.data(1));
-        //ROS_INFO("current Jac z %f", J4_.data(2));
         Jac_vec_[0] = J_;
         Jac_vec_[1] = J2_;
         Jac_vec_[2] = J3_;
@@ -241,29 +235,22 @@ class trajectory_planner {
                 q_dot_cmd_.data = J_inv_.data * Vcmd_jnt_.data;
             }
 
+            //KDL::JntArray q = rep_potential_end_effector();
+            KDL::JntArray q; 
+            KDL::JntArray q_pot_rep;
+            q.data = Eigen::VectorXd::Zero(n_joints_);
 
-            //J_temp_.data = (J_.data * J_trans_.data + 0.1 * I);
-            //q_dot_cmd_.data = J_trans_.data * J_temp_.data.inverse() * Vcmd_jnt_.data;
-        
+            for (int i = 0; i < FK_vec_.size() ; i++) {
 
-            KDL::JntArray q = rep_potential_end_effector();
-            //KDL::JntArray q; 
-            //KDL::JntArray q_pot_rep;
-            //q.data = Eigen::VectorXd::Zero(n_joints_);
-
-            //ROS_INFO("test 1");
-            //for (int i = 0; i < FK_vec_.size() ; i++) {
-            //    ROS_INFO("test 2");
-            //    q_pot_rep.data = Eigen::VectorXd::Zero(n_joints_);
-            //    q_pot_rep = rep_potential_sum(FK_vec_.at(i), Jac_vec_.at(i));
+                q_pot_rep.data = Eigen::VectorXd::Zero(n_joints_);
+                q_pot_rep = rep_potential_sum(FK_vec_.at(i), Jac_vec_.at(i));
 //
-            //    for (int j = 0; j < n_joints_; j++) {
-            //        ROS_INFO("test 3");
-            //        q(j) += q_pot_rep(j);
-            //    }
+                for (int j = 0; j < n_joints_; j++) {
+
+                    q(j) += q_pot_rep(j);
+                }
 //
-            //}
-            //ROS_INFO("test 4");
+                }
 
             if (print_state == 100) {
 
@@ -390,13 +377,6 @@ class trajectory_planner {
         }
 
         KDL::JntArray rep_potential_sum(KDL::Frame x, KDL::Jacobian J){
-            ROS_INFO("current frame x %f", x.p(0));
-            ROS_INFO("current frame y %f", x.p(1));
-            ROS_INFO("current frame z %f", x.p(2));
-
-            ROS_INFO("current frame x %f", J.data(0));
-            ROS_INFO("current frame y %f", J.data(1));
-            ROS_INFO("current frame z %f", J.data(2));
 
             KDL::JntArray q_dot_cmd_rep;
             float min_dist = 1000000;// init to high value
@@ -409,7 +389,6 @@ class trajectory_planner {
                     min_obs_point = i;
                 }
             }
-            ROS_INFO("obs found");
             float q = 0.25; 
             KDL::JntArray p;
             p.data = Eigen::VectorXd::Zero(n_joints_);
@@ -435,17 +414,7 @@ class trajectory_planner {
 
             }
 
-            ROS_INFO("pot found");
-
             q_dot_cmd_rep.data = J.data.transpose() * p.data;
-            ROS_INFO("vel found");
-
-            ROS_INFO("q_pot: %f", q_dot_cmd_rep(0));
-            ROS_INFO("q_pot: %f", q_dot_cmd_rep(1));
-            ROS_INFO("q_pot: %f", q_dot_cmd_rep(2));
-            ROS_INFO("q_pot: %f", q_dot_cmd_rep(3));
-            ROS_INFO("q_pot: %f", q_dot_cmd_rep(4));
-            ROS_INFO("q_pot: %f", q_dot_cmd_rep(5));
 
             return q_dot_cmd_rep;
         }
