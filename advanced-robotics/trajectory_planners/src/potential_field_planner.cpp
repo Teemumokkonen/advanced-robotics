@@ -134,10 +134,10 @@ class trajectory_planner {
 
             KDL::Vector obs_point;
             obs_point(0) = 0.0; //x
-            obs_point(1) = -0.45;  //y
+            obs_point(1) = -0.35;  //y
             obs_point(2) = 0.2; //z
             obs_points_.push_back(obs_point);
-            obs_point(2) = 0.5; //z
+            obs_point(2) = 0.4; //z
             obs_points_.push_back(obs_point);
             obs_point(2) = 0.6; //z
             obs_points_.push_back(obs_point);
@@ -246,8 +246,7 @@ class trajectory_planner {
                 q_pot_rep = rep_potential_sum(FK_vec_.at(i), Jac_vec_.at(i));
 //
                 for (int j = 0; j < n_joints_; j++) {
-
-                    q(j) += q_pot_rep(j);
+                    q(j) += q_pot_rep(j) + joint_limit_rep(j);
                 }
 //
                 }
@@ -263,27 +262,6 @@ class trajectory_planner {
                 ROS_INFO("current frame x %f", x_.p(0));
                 ROS_INFO("current frame y %f", x_.p(1));
                 ROS_INFO("current frame z %f", x_.p(2));
-
-
-                //ROS_INFO("first link x pose %f", FK_vec_[1].p(0));
-                //ROS_INFO("first link y pose %f", FK_vec_[1].p(1));
-                //ROS_INFO("first link z pose %f", FK_vec_[1].p(2));
-//
-                //ROS_INFO("second link x pose %f", FK_vec_[2].p(0));
-                //ROS_INFO("second link y pose %f", FK_vec_[2].p(1));
-                //ROS_INFO("second link z pose %f", FK_vec_[2].p(2));
-//
-                //ROS_INFO("third link x pose %f", FK_vec_[3].p(0));
-                //ROS_INFO("third link y pose %f", FK_vec_[3].p(1));
-                //ROS_INFO("third link z pose %f", FK_vec_[3].p(2));
-//
-                //ROS_INFO("fourth link x pose %f", FK_vec_[4].p(0));
-                //ROS_INFO("fourth link y pose %f", FK_vec_[4].p(1));
-                //ROS_INFO("fourth link z pose %f", FK_vec_[4].p(2));
-//
-                //ROS_INFO("fifth link x pose %f", FK_vec_[5].p(0));
-                //ROS_INFO("fifth link y pose %f", FK_vec_[5].p(1));
-                //ROS_INFO("fifth link z pose %f", FK_vec_[5].p(2));
 
                 ROS_INFO("\r");
 
@@ -419,6 +397,27 @@ class trajectory_planner {
             return q_dot_cmd_rep;
         }
 
+        float joint_limit_rep(int joint) {
+            KDL::JntArray q_dot__lim_rep;
+            float min_lim = -1.57;
+            float max_lim = 1.57;
+            float curr = q_(joint);
+            float rep = 0;
+            
+            if (joint_lim_.at(joint) != 3.14) {
+                if (joint_lim_.at(joint) - curr < 0.05) {
+                    rep = 0.2 * (curr - joint_lim_.at(joint));
+                }
+                else if (-joint_lim_.at(joint) + curr < 0.05) {
+                    rep = 0.2 * (joint_lim_.at(joint) - curr);
+                }
+
+            }
+            return rep;
+
+
+        }
+
     private:
         int print_state = 0;
         KDL::Twist Vcmd_;
@@ -445,6 +444,7 @@ class trajectory_planner {
         KDL::Twist Xerr_;
         KDL::Jacobian J_, J2_, J3_, J4_, J5_, J6_;
         std::vector<KDL::Jacobian> Jac_vec_ {J_, J2_, J3_, J4_, J5_, J6_};
+        std::vector<float> joint_lim_ {3.14, 2.35, 2.61, 3.14, 2.56, 3.14};
         KDL::Jacobian J_inv_;
         KDL::Jacobian J_trans_;
         KDL::Jacobian J_temp_;
