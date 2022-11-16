@@ -134,7 +134,7 @@ class trajectory_planner {
 
             KDL::Vector obs_point;
             obs_point(0) = 0.0; //x
-            obs_point(1) = -0.35;  //y
+            obs_point(1) = -0.45;  //y
             obs_point(2) = 0.2; //z
             obs_points_.push_back(obs_point);
             obs_point(2) = 0.4; //z
@@ -244,11 +244,10 @@ class trajectory_planner {
 
                 q_pot_rep.data = Eigen::VectorXd::Zero(n_joints_);
                 q_pot_rep = rep_potential_sum(FK_vec_.at(i), Jac_vec_.at(i));
-//
+
                 for (int j = 0; j < n_joints_; j++) {
                     q(j) += q_pot_rep(j) + joint_limit_rep(j);
-                }
-//
+                    }
                 }
 
             if (print_state == 100) {
@@ -367,7 +366,7 @@ class trajectory_planner {
                     min_obs_point = i;
                 }
             }
-            float q = 0.25; 
+            float q = 0.30; 
             KDL::JntArray p;
             p.data = Eigen::VectorXd::Zero(n_joints_);
 
@@ -382,7 +381,7 @@ class trajectory_planner {
             }
 
             else {
-                float k = 1.0;
+                float k = 1.5;
                 p(0) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x.p(0) - obs_points_.at(min_obs_point)(0))/min_dist); 
                 p(1) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x.p(1) - obs_points_.at(min_obs_point)(1))/min_dist); 
                 p(2) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x.p(2) - obs_points_.at(min_obs_point)(2))/min_dist);
@@ -399,17 +398,15 @@ class trajectory_planner {
 
         float joint_limit_rep(int joint) {
             KDL::JntArray q_dot__lim_rep;
-            float min_lim = -1.57;
-            float max_lim = 1.57;
             float curr = q_(joint);
             float rep = 0;
             
             if (joint_lim_.at(joint) != 3.14) {
                 if (joint_lim_.at(joint) - curr < 0.05) {
-                    rep = 0.2 * (curr - joint_lim_.at(joint));
+                    rep = 0.1 * (curr - joint_lim_.at(joint));
                 }
                 else if (-joint_lim_.at(joint) + curr < 0.05) {
-                    rep = 0.2 * (joint_lim_.at(joint) - curr);
+                    rep = 0.1 * (joint_lim_.at(joint) - curr);
                 }
 
             }
