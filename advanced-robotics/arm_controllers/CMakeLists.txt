@@ -58,6 +58,7 @@ add_library(${PROJECT_NAME}
   src/passivity_controller.cpp
   src/computed_velocity_controller.cpp
   src/cVc.cpp
+  src/impedance_control.cpp
 )
 
 target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})

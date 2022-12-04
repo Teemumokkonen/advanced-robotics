@@ -31,7 +31,7 @@ def talker():
     spawn_model_client = rospy.ServiceProxy('/gazebo/spawn_sdf_model', SpawnModel)
     spawn_model_client(
     model_name='aruco_marker',
-        model_xml=open('/home/localadmin/.gazebo/models/aruco_visual_marker_0/model.sdf', 'r').read(),
+        model_xml=open('/home/teemu/.gazebo/models/aruco_visual_marker_0/model.sdf', 'r').read(),
         robot_namespace='/foo',
         initial_pose=pose,
         reference_frame='world'
