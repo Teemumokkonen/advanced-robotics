@@ -173,11 +173,6 @@ class trajectory_planner {
         FK_vec_[4] = x_5_;
         FK_vec_[5] = x_6_;
 
-        TreeJntToJacSolver_->JntToJac(q_, J2_, "elfin_joint1");
-        TreeJntToJacSolver_->JntToJac(q_, J3_, "elfin_joint2");
-        TreeJntToJacSolver_->JntToJac(q_, J4_, "elfin_joint3");
-        TreeJntToJacSolver_->JntToJac(q_, J5_, "elfin_joint4");
-        TreeJntToJacSolver_->JntToJac(q_, J6_, "elfin_joint5");
         jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
         jnt_to_jac_solver_->JntToJac(q_, J2_, 3); // jacobian of the joint
         jnt_to_jac_solver_->JntToJac(q_, J3_, 4); // jacobian of the joint

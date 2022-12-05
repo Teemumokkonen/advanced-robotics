@@ -108,6 +108,13 @@ class trajectory_planner {
             }
 
             J_.resize(kdl_chain_.getNrOfJoints());
+            J2_.resize(kdl_chain_.getNrOfJoints());
+            J3_.resize(kdl_chain_.getNrOfJoints());
+            J4_.resize(kdl_chain_.getNrOfJoints());
+            J5_.resize(kdl_chain_.getNrOfJoints());
+            J6_.resize(kdl_chain_.getNrOfJoints());
+
+            J_.resize(kdl_chain_.getNrOfJoints());
             J_inv_.resize(kdl_chain_.getNrOfJoints());
             J_temp_.resize(kdl_chain_.getNrOfJoints());
             J_trans_.resize(kdl_chain_.getNrOfJoints());
@@ -118,6 +125,23 @@ class trajectory_planner {
             init_pose();
             return true;
             }
+
+        
+        void init_obs(){
+            // populate artificial obstacle fields for obstacle
+
+            KDL::Vector obs_point;
+            obs_point(0) = 0.0; //x
+            obs_point(1) = -0.45;  //y
+            obs_point(2) = 0.2; //z
+            obs_points_.push_back(obs_point);
+            obs_point(2) = 0.4; //z
+            obs_points_.push_back(obs_point);
+            obs_point(2) = 0.6; //z
+            obs_points_.push_back(obs_point);
+            obs_point(2) = 0.8; //z
+            obs_points_.push_back(obs_point);
+        }
 
 
         void init_pose() {
@@ -135,7 +159,35 @@ class trajectory_planner {
             q_(i) = msg->data[i];
         }
 
+        
+        fk_pos_solver_->JntToCart(q_, x_2_, 3);
+        fk_pos_solver_->JntToCart(q_, x_3_, 4);
+        fk_pos_solver_->JntToCart(q_, x_4_, 5);
+        fk_pos_solver_->JntToCart(q_, x_5_, 6);
+        fk_pos_solver_->JntToCart(q_, x_6_, 7);
         fk_pos_solver_->JntToCart(q_, x_); // end effector poss 
+        
+        FK_vec_[0] = x_;
+        FK_vec_[1] = x_2_;
+        FK_vec_[2] = x_3_;
+        FK_vec_[3] = x_4_;
+        FK_vec_[4] = x_5_;
+        FK_vec_[5] = x_6_;
+
+        jnt_to_jac_solver_->JntToJac(q_, J_); // jacobian of the joint
+        jnt_to_jac_solver_->JntToJac(q_, J2_, 3); // jacobian of the joint
+        jnt_to_jac_solver_->JntToJac(q_, J3_, 4); // jacobian of the joint
+        jnt_to_jac_solver_->JntToJac(q_, J4_, 5); // jacobian of the joint
+        jnt_to_jac_solver_->JntToJac(q_, J5_, 6); // jacobian of the joint
+        jnt_to_jac_solver_->JntToJac(q_, J6_, 7); // jacobian of the joint
+
+        Jac_vec_[0] = J_;
+        Jac_vec_[1] = J2_;
+        Jac_vec_[2] = J3_;
+        Jac_vec_[3] = J4_;
+        Jac_vec_[4] = J5_; 
+        Jac_vec_[5] = J6_; 
+
         calc_diff();
         }
 
@@ -205,6 +257,21 @@ class trajectory_planner {
                 q_dot_cmd_.data = J_inv_.data * Vcmd_jnt_.data;
             }
 
+            KDL::JntArray q; 
+            KDL::JntArray q_pot_rep;
+            q.data = Eigen::VectorXd::Zero(n_joints_);
+
+            for (int i = 0; i < FK_vec_.size() ; i++) {
+
+                q_pot_rep.data = Eigen::VectorXd::Zero(n_joints_);
+                q_pot_rep = rep_potential_sum(FK_vec_.at(i), Jac_vec_.at(i));
+
+                //for (int j = 0; j < n_joints_; j++) {
+                //    q(j) += q_pot_rep(j) + joint_limit_rep(j);
+                //    }
+            }
+
+            q_dot_cmd_.data = q_dot_cmd_.data + q.data; 
 
             twist_msgs_.linear.x = q_dot_cmd_(0);
             twist_msgs_.linear.y = q_dot_cmd_(1);
@@ -258,6 +325,107 @@ class trajectory_planner {
             return true;
         }
 
+         KDL::JntArray rep_potential_end_effector(){
+            KDL::JntArray q_dot_cmd_rep;
+            float min_dist = 1000000;// init to high value
+            int min_obs_point = 0;
+            for (int i = 0; i < obs_points_.size(); i++) {
+                float dist = sqrt(pow(obs_points_.at(i)(0) - x_.p(0), 2) + pow(obs_points_.at(i)(1) - x_.p(1), 2) + pow(obs_points_.at(i)(1) - x_.p(1), 2));
+
+                if (dist < min_dist) {
+                    min_dist = dist;
+                    min_obs_point = i;
+                }
+            }
+            float q = 0.25; 
+            KDL::JntArray p;
+            p.data = Eigen::VectorXd::Zero(n_joints_);
+
+
+            if (min_dist > q) {
+                p(0) = 0.0;
+                p(1) = 0.0; 
+                p(2) = 0.0;
+                p(3) = 0.0; // don't read rotations 
+                p(4) = 0.0;
+                p(5) = 0.0;
+            }
+
+            else {
+                float k = 1.0;
+                p(0) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x_.p(0) - obs_points_.at(min_obs_point)(0))/min_dist); 
+                p(1) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x_.p(1) - obs_points_.at(min_obs_point)(1))/min_dist); 
+                p(2) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x_.p(2) - obs_points_.at(min_obs_point)(2))/min_dist);
+                p(3) = 0.0; // don't read rotations 
+                p(4) = 0.0;
+                p(5) = 0.0;
+
+            }
+
+            q_dot_cmd_rep.data = J_trans_.data * p.data;
+            return q_dot_cmd_rep;
+        }
+
+        KDL::JntArray rep_potential_sum(KDL::Frame x, KDL::Jacobian J){
+
+            KDL::JntArray q_dot_cmd_rep;
+            float min_dist = 1000000;// init to high value
+            int min_obs_point = 0;
+            for (int i = 0; i < obs_points_.size(); i++) {
+                float dist = sqrt(pow(obs_points_.at(i)(0) - x.p(0), 2) + pow(obs_points_.at(i)(1) - x.p(1), 2) + pow(obs_points_.at(i)(1) - x.p(1), 2));
+
+                if (dist < min_dist) {
+                    min_dist = dist;
+                    min_obs_point = i;
+                }
+            }
+            float q = 0.30; 
+            KDL::JntArray p;
+            p.data = Eigen::VectorXd::Zero(n_joints_);
+
+
+            if (min_dist > q) {
+                p(0) = 0.0;
+                p(1) = 0.0; 
+                p(2) = 0.0;
+                p(3) = 0.0; // don't read rotations 
+                p(4) = 0.0;
+                p(5) = 0.0;
+            }
+
+            else {
+                float k = 1.5;
+                p(0) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x.p(0) - obs_points_.at(min_obs_point)(0))/min_dist); 
+                p(1) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x.p(1) - obs_points_.at(min_obs_point)(1))/min_dist); 
+                p(2) = k * ((1/min_dist) - (1/q)) * (1/pow(min_dist, 2)) * ((x.p(2) - obs_points_.at(min_obs_point)(2))/min_dist);
+                p(3) = 0.0; // don't read rotations 
+                p(4) = 0.0;
+                p(5) = 0.0;
+
+            }
+
+            q_dot_cmd_rep.data = J.data.transpose() * p.data;
+
+            return q_dot_cmd_rep;
+        }
+
+        float joint_limit_rep(int joint) {
+            KDL::JntArray q_dot__lim_rep;
+            float curr = q_(joint);
+            float rep = 0;
+            
+            if (joint_lim_.at(joint) != 3.14) {
+                if (joint_lim_.at(joint) - curr < 0.05) {
+                    rep = 0.1 * (curr - joint_lim_.at(joint));
+                }
+                else if (-joint_lim_.at(joint) + curr < 0.05) {
+                    rep = 0.1 * (joint_lim_.at(joint) - curr);
+                }
+
+            }
+            return rep;
+        }
+
     private:
         int print_state = 0;
         KDL::Twist Vcmd_;
@@ -269,7 +437,8 @@ class trajectory_planner {
         ros::Subscriber target_tag_world_subs_;
         ros::Publisher vel_pub_;
         ros::Publisher twist_error_pub_;
-        KDL::Frame x_; // end effector frame
+        KDL::Frame x_, x_2_, x_3_, x_4_, x_5_, x_6_; // end effector frame
+        std::vector<KDL::Frame> FK_vec_ {x_, x_2_, x_3_, x_4_, x_5_, x_6_};
         KDL::Frame xd_, xd_old_; // end effector frame
         actionlib::SimpleActionClient<command_msgs::planAction> *ac;
         std::vector<std::string> joint_names_;
@@ -281,12 +450,15 @@ class trajectory_planner {
         KDL::Tree kdl_tree_;   // kinematic tree based of the model urdf downloaded from the parameter server
         float t_ = 0.5;
         KDL::Twist Xerr_;
-        KDL::Jacobian J_;
+        KDL::Jacobian J_, J2_, J3_, J4_, J5_, J6_;
+        std::vector<KDL::Jacobian> Jac_vec_ {J_, J2_, J3_, J4_, J5_, J6_};
+        std::vector<float> joint_lim_ {3.14, 2.35, 2.61, 3.14, 2.56, 3.14};
         KDL::Jacobian J_inv_;
         KDL::Jacobian J_trans_;
         KDL::Jacobian J_temp_;
         geometry_msgs::Twist twist_msgs_;
         geometry_msgs::Twist twist_err_msgs_;
+        std::vector<KDL::Vector> obs_points_;
         ros::ServiceServer service;
         bool is_following_tag = false;
 };
