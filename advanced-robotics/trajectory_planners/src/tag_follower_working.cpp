@@ -42,6 +42,7 @@ class trajectory_planner {
             target_pose_subs_ = n.subscribe<geometry_msgs::TransformStamped>("target_pose", 1000, &trajectory_planner::target_pose_callback, this);
             target_tag_subs_ = n.subscribe<geometry_msgs::TransformStamped>("aruco_single/transform", 1000, &trajectory_planner::target_tag_callback, this);
             target_tag_world_subs_ = n.subscribe<geometry_msgs::TransformStamped>("aruco_single_world/transform", 1000, &trajectory_planner::target_tag_callback, this);
+
             twist_error_pub_ = n.advertise<geometry_msgs::Twist>("Xerr_", 1000);
             vel_pub_ = n.advertise<geometry_msgs::Twist>("/elfin/cvc/command/test", 1000);
             service = n.advertiseService("init_tag_following", &trajectory_planner::set_following, this);
@@ -215,10 +216,10 @@ class trajectory_planner {
                 xd_.p(0) = msg->transform.translation.x;
 
                 if (msg->transform.translation.y > 0) {
-                    xd_.p(1) = msg->transform.translation.y - 0.4; // back away from frame
+                    xd_.p(1) = msg->transform.translation.y - dist_to_target; // back away from frame
                 } 
                 else {
-                    xd_.p(1) = msg->transform.translation.y + 0.4; // back away from frame
+                    xd_.p(1) = msg->transform.translation.y + dist_to_target; // back away from frame
                 }
 
                 xd_.p(2) = msg->transform.translation.z;
@@ -461,6 +462,9 @@ class trajectory_planner {
         std::vector<KDL::Vector> obs_points_;
         ros::ServiceServer service;
         bool is_following_tag = false;
+
+        // distance wanted to keep to the target tag
+        float dist_to_target = 0.35;
 };
 
 };
