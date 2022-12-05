@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(trajectory_planners)
+project(speech_parser)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -7,18 +7,8 @@ project(trajectory_planners)
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
-find_package(catkin REQUIRED COMPONENTS
-            roscpp
-            kdl_parser
-            actionlib
-            actionlib_msgs
-            command_msgs
-            realtime_tools
-            dynamic_reconfigure
-            std_msgs
-            message_generation
-            )
- 
+find_package(catkin REQUIRED)
+
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
@@ -60,24 +50,24 @@ find_package(catkin REQUIRED COMPONENTS
 # )
 
 ## Generate services in the 'srv' folder
-add_service_files(
-   FILES
-   tag_init.srv
-  # Service1.srv
-  # Service2.srv
-)
+# add_service_files(
+#   FILES
+#   Service1.srv
+#   Service2.srv
+# )
 
 ## Generate actions in the 'action' folder
 # add_action_files(
-#   DIRECTORY action
-#   FILES plan.action
+#   FILES
+#   Action1.action
+#   Action2.action
 # )
 
 ## Generate added messages and services with any dependencies listed here
-generate_messages(
-   DEPENDENCIES
-   std_msgs 
-)
+# generate_messages(
+#   DEPENDENCIES
+#   std_msgs  # Or other packages containing msgs
+# )
 
 ################################################
 ## Declare ROS dynamic reconfigure parameters ##
@@ -109,14 +99,10 @@ generate_messages(
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-  CATKIN_DEPENDS
-    actionlib_msgs
-    angles
-    kdl_parser
-    command_msgs
-    realtime_tools
-    dynamic_reconfigure
-  LIBRARIES ${PROJECT_NAME}
+#  INCLUDE_DIRS include
+#  LIBRARIES speech_parser
+#  CATKIN_DEPENDS other_catkin_pkg
+#  DEPENDS system_lib
 )
 
 ###########
@@ -126,69 +112,25 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
- ${catkin_INCLUDE_DIRS}
+# include
+# ${catkin_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
 # add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/trajectory_planners.cpp
+#   src/${PROJECT_NAME}/speech_parser.cpp
 # )
-
-## Declare a C++ executable
-## With catkin_make all packages are built within a single CMake context
-## The recommended prefix ensures that target names across packages don't collide
-add_executable(straight_line_planner_node src/straight_line_planner.cpp)
-add_executable(tag_follower_node src/tag_follower.cpp)
-add_executable(tag_follower_node_working src/tag_follower_working.cpp)
-add_executable(dynamic_obs_avoid_node src/potential_field_planner.cpp)
-add_executable(task_space_node src/task_space_commander.cpp)
-## Specify libraries to link a library or executable target against
-target_link_libraries(
-  straight_line_planner_node
-  ${catkin_LIBRARIES}
-)
-
-target_link_libraries(
-  tag_follower_node
-  ${catkin_LIBRARIES}
-)
-
-target_link_libraries(
-  tag_follower_node_working
-  ${catkin_LIBRARIES}
-)
-
-
-target_link_libraries(
-  dynamic_obs_avoid_node
-  ${catkin_LIBRARIES}
-)
-
-target_link_libraries(
-  task_space_node
-  ${catkin_LIBRARIES}
-)
-
-
-install(DIRECTORY launch
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
-
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
 ## either from message generation or dynamic reconfigure
-add_dependencies(straight_line_planner_node
-                ${trajectory_planners_EXPORTED_TARGETS}
-                ${catkin_EXPORTED_TARGETS})
+# add_dependencies(${PROJECT_NAME} ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
-add_dependencies(tag_follower_node
-                ${trajectory_planners_EXPORTED_TARGETS}
-                ${catkin_EXPORTED_TARGETS})
+## Declare a C++ executable
+## With catkin_make all packages are built within a single CMake context
+## The recommended prefix ensures that target names across packages don't collide
+# add_executable(${PROJECT_NAME}_node src/speech_parser_node.cpp)
 
-
-add_dependencies(tag_follower_node_working
-                ${trajectory_planners_EXPORTED_TARGETS}
-                ${catkin_EXPORTED_TARGETS})
 ## Rename C++ executable without prefix
 ## The above recommended prefix causes long target names, the following renames the
 ## target back to the shorter version for ease of user use
@@ -198,6 +140,11 @@ add_dependencies(tag_follower_node_working
 ## Add cmake target dependencies of the executable
 ## same as for the library above
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+
+## Specify libraries to link a library or executable target against
+# target_link_libraries(${PROJECT_NAME}_node
+#   ${catkin_LIBRARIES}
+# )
 
 #############
 ## Install ##
@@ -246,10 +193,14 @@ add_dependencies(tag_follower_node_working
 #############
 
 ## Add gtest based cpp test target and link libraries
-# catkin_add_gtest(${PROJECT_NAME}-test test/test_trajectory_planners.cpp)
+# catkin_add_gtest(${PROJECT_NAME}-test test/test_speech_parser.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 # endif()
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
+
+catkin_install_python(PROGRAMS scripts/speech_parser.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)

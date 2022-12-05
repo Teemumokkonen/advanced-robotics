@@ -8,6 +8,18 @@
     <arg name="corner_refinement" default="LINES" /> <!-- NONE, HARRIS, LINES, SUBPIX -->
 
 
+    <node pkg="aruco_ros" type="single" name="aruco_single_world">
+        <remap from="/camera_info" to="/camera/camera_info/world" />
+        <remap from="/image" to="/camera/image/world" />
+        <param name="image_is_rectified" value="True"/>
+        <param name="marker_size"        value="$(arg markerSize)"/>
+        <param name="marker_id"          value="$(arg markerId)"/>
+        <param name="reference_frame"    value="elfin_link6"/>   <!-- frame in which the marker pose will be refered -->
+        <param name="camera_frame"       value="camera_link_world_optical"/>
+        <param name="marker_frame"       value="$(arg marker_frame)" />
+        <param name="corner_refinement"  value="$(arg corner_refinement)" />
+    </node>
+
     <node pkg="aruco_ros" type="single" name="aruco_single">
         <remap from="/camera_info" to="/camera/camera_info" />
         <remap from="/image" to="/camera/image" />
@@ -20,5 +32,5 @@
         <param name="corner_refinement"  value="$(arg corner_refinement)" />
     </node>
 
-</launch>
 
+</launch>

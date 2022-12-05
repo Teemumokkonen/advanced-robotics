@@ -445,6 +445,8 @@
   <xacro:include filename="$(find elfin_description)/urdf/elfin_transmission.xacro" />
 
   <xacro:include filename="$(find elfin_description)/urdf/camera_world.xacro" />
+
+  <xacro:include filename="$(find elfin_description)/urdf/camera.xacro" />
   
   
 </robot>

@@ -1,693 +1,555 @@
+/*
+ * This file contains plugin for controlling the robot with velocity controller and kinematic controller 
+ * in Joint space and task space.
+ * This controller can take commands in the task and Joint space.
+ * 
+ * Robot is always initialized in the some position in the task space control,
+ * but the the control method can be changed on the fly to be either in joint space or in task space,
+ * which is defined by the trajectory planner.
+*/
+
+
+// from ros-control meta packages
 #include <controller_interface/controller.h>
 #include <hardware_interface/joint_command_interface.h>
-#include <control_toolbox/pid.h>
-#include <realtime_tools/realtime_buffer.h>
 
 #include <pluginlib/class_list_macros.h>
 #include <std_msgs/Float64MultiArray.h>
-#include <angles/angles.h>
-#include <geometry_msgs/WrenchStamped.h>
-
+#include <geometry_msgs/Twist.h>
+#include <vector>
 #include <urdf/model.h>
 
+// from kdl packages
 #include <kdl/tree.hpp>
 #include <kdl/kdl.hpp>
 #include <kdl/chain.hpp>
-#include <kdl/chaindynparam.hpp>
+#include <kdl/frames.hpp>
+#include <kdl_parser/kdl_parser.hpp>
+#include <kdl/chaindynparam.hpp>              // inverse dynamics
+#include <kdl/chainjnttojacsolver.hpp> 
 #include <kdl/chainfksolverpos_recursive.hpp>
 #include <kdl/chainiksolvervel_pinv.hpp>
-#include <kdl/chainiksolverpos_nr_jl.hpp>
-#include <kdl_parser/kdl_parser.hpp>
-#include <tf_conversions/tf_kdl.h>
+#include <utils/pseudo_inversion.h>
+#include <utils/skew_symmetric.h>
+
+#include <Eigen/Core>
+#include <Eigen/Geometry>
+#include <eigen_conversions/eigen_kdl.h>
+#include <Eigen/LU>
 
 #include <boost/scoped_ptr.hpp>
+#include <boost/lexical_cast.hpp>
 
+
+#define A 0.1
 #define PI 3.141592
 #define D2R PI / 180.0
 #define R2D 180.0 / PI
-#define JointMax 6
-#define SaveDataMax 7
+#define SaveDataMax 49
+#define t_set 1
+#define b 2.5
+#define f 1 
 
 namespace arm_controllers
 {
-
-	class ImpedanceController : public controller_interface::Controller<hardware_interface::EffortJointInterface>
-	{
-	public:
-		~ImpedanceController()
-		{
-			sub_q_cmd_.shutdown();
-			sub_forcetorque_sensor_.shutdown();
-		}
-
-		bool init(hardware_interface::EffortJointInterface *hw, ros::NodeHandle &n)
-		{
-			// List of controlled joints
-			if (!n.getParam("joints", joint_names_))
-			{
-				ROS_ERROR("Could not find joint name");
-				return false;
-			}
-			n_joints_ = joint_names_.size();
-
-			if (n_joints_ == 0)
-			{
-				ROS_ERROR("List of joint names is empty.");
-				return false;
-			}
-
-			// urdf
-			urdf::Model urdf;
-			if (!urdf.initParam("elfin/robot_description"))
-			{
-				ROS_ERROR("Failed to parse urdf file");
-				return false;
-			}
-
-			// joint handle
-			for (int i = 0; i < n_joints_; i++)
-			{
-				try
-				{
-					joints_.push_back(hw->getHandle(joint_names_[i]));
-				}
-				catch (const hardware_interface::HardwareInterfaceException &e)
-				{
-					ROS_ERROR_STREAM("Exception thrown: " << e.what());
-					return false;
-				}
-
-				urdf::JointConstSharedPtr joint_urdf = urdf.getJoint(joint_names_[i]);
-				if (!joint_urdf)
-				{
-					ROS_ERROR("Could not find joint '%s' in urdf", joint_names_[i].c_str());
-					return false;
-				}
-				joint_urdfs_.push_back(joint_urdf);
-			}
-
-			// kdl parser
-			if (!kdl_parser::treeFromUrdfModel(urdf, kdl_tree_))
-			{
-				ROS_ERROR("Failed to construct kdl tree");
-				return false;
-			}
-
-			// kdl chain
-			std::string root_name, tip_name;
-			if (!n.getParam("root_link", root_name))
-			{
-				ROS_ERROR("Could not find root link name");
-				return false;
-			}
-			if (!n.getParam("tip_link", tip_name))
-			{
-				ROS_ERROR("Could not find tip link name");
-				return false;
-			}
-			if (!kdl_tree_.getChain(root_name, tip_name, kdl_chain_))
-			{
-				ROS_ERROR_STREAM("Failed to get KDL chain from tree: ");
-				ROS_ERROR_STREAM("  " << root_name << " --> " << tip_name);
-				ROS_ERROR_STREAM("  Tree has " << kdl_tree_.getNrOfJoints() << " joints");
-				ROS_ERROR_STREAM("  Tree has " << kdl_tree_.getNrOfSegments() << " segments");
-				ROS_ERROR_STREAM("  The segments are:");
-
-				KDL::SegmentMap segment_map = kdl_tree_.getSegments();
-				KDL::SegmentMap::iterator it;
-
-				for (it = segment_map.begin(); it != segment_map.end(); it++)
-					ROS_ERROR_STREAM("    " << (*it).first);
-
-				return false;
-			}
-
-			gravity_ = KDL::Vector::Zero();
-			gravity_(2) = -9.81;
-			G_.resize(n_joints_);
-
-			// inverse dynamics solver
-			id_solver_.reset(new KDL::ChainDynParam(kdl_chain_, gravity_));
-			fk_solver_.reset(new KDL::ChainFkSolverPos_recursive(kdl_chain_));
-			ik_vel_solver_.reset(new KDL::ChainIkSolverVel_pinv(kdl_chain_));
-			// ik_pos_solver_.reset(new KDL::ChainIkSolverPos_NR_JL(kdl_chain_, fk_solver_, ik_vel_solver_));
-
-			// command and state
-			tau_cmd_.data = Eigen::VectorXd::Zero(n_joints_);
-			tau_cmd_old_.data = Eigen::VectorXd::Zero(n_joints_);
-			q_cmd_sp_.data = Eigen::VectorXd::Zero(n_joints_);
-			q_cmd_.data = Eigen::VectorXd::Zero(n_joints_);
-			q_cmd_old_.data = Eigen::VectorXd::Zero(n_joints_);
-			qdot_cmd_.data = Eigen::VectorXd::Zero(n_joints_);
-			qdot_cmd_old_.data = Eigen::VectorXd::Zero(n_joints_);
-			qddot_cmd_.data = Eigen::VectorXd::Zero(n_joints_);
-			q_cmd_end_.data = Eigen::VectorXd::Zero(n_joints_);
-
-			q_.data = Eigen::VectorXd::Zero(n_joints_);
-			q_init_.data = Eigen::VectorXd::Zero(n_joints_);
-			qdot_.data = Eigen::VectorXd::Zero(n_joints_);
-			qdot_old_.data = Eigen::VectorXd::Zero(n_joints_);
-			qddot_.data = Eigen::VectorXd::Zero(n_joints_);
-
-			for (size_t i = 0; i < 6; i++)
-			{
-				Xc_dot_(i) = 0.0;
-				Xc_dot_old_(i) = 0.0;
-				Xc_ddot_(i) = 0.0;
-			}
-
-			// gains
-			Mbar_.resize(n_joints_);
-			Mbar_dot_.resize(n_joints_);
-			Ramda_.resize(n_joints_);
-			Alpha_.resize(n_joints_);
-			Omega_.resize(n_joints_);
-
-			Xr_dot_ = 0.0;
-			Xe_dot_ = 0.0;
-			Xe_ddot_ = 0.0;
-			Fd_ = 0.0;
-			Fd_temp_ = 0.0;
-			Fd_old_ = 0.0;
-			Fe_ = 0.0;
-			Fe_old_ = 0.0;
-			M_ = 0.0;
-			B_ = 0.0;
-			del_B_ = 0.0;
-			B_buffer_ = 0.0;
-			PI_ = 0.0;
-			PI_old_ = 0.0;
-
-			filt_old_ = 0.0;
-			filt_ = 0.0;
-			tau_ = 1.0 / (2 * PI * 9.0);
-
-			f_cur_buffer_ = 0.0;
-
-			experiment_mode_ = 0;
-
-			std::vector<double> Mbar(n_joints_), Ramda(n_joints_), Alpha(n_joints_), Omega(n_joints_);
-			for (size_t i = 0; i < n_joints_; i++)
-			{
-				std::string si = boost::lexical_cast<std::string>(i + 1);
-				if (n.getParam("/elfin/impedance_controller/joint" + si + "/tdc/mbar", Mbar[i]))
-				{
-					Mbar_(i) = Mbar[i];
-				}
-				else
-				{
-					std::cout << "/elfin/impedance_controller/joint" + si + "/tdc/mbar" << std::endl;
-					ROS_ERROR("Cannot find tdc/mbar gain");
-					return false;
-				}
-
-				if (n.getParam("/elfin/impedance_controller/joint" + si + "/tdc/r", Ramda[i]))
-				{
-					Ramda_(i) = Ramda[i];
-				}
-				else
-				{
-					ROS_ERROR("Cannot find tdc/r gain");
-					return false;
-				}
-
-				if (n.getParam("/elfin/impedance_controller/joint" + si + "/tdc/a", Alpha[i]))
-				{
-					Alpha_(i) = Alpha[i];
-				}
-				else
-				{
-					ROS_ERROR("Cannot find tdc/a gain");
-					return false;
-				}
-
-				if (n.getParam("/elfin/impedance_controller/joint" + si + "/tdc/w", Omega[i]))
-				{
-					Omega_(i) = Omega[i];
-				}
-				else
-				{
-					ROS_ERROR("Cannot find tdc/w gain");
-					return false;
-				}
-			}
-
-			if (!n.getParam("/elfin/impedance_controller/aic/fd", Fd_temp_))
-			{
-				ROS_ERROR("Cannot find aci/fd");
-				return false;
-			}
-
-			if (!n.getParam("/elfin/impedance_controller/aic/m", M_))
-			{
-				ROS_ERROR("Cannot find aci/m");
-				return false;
-			}
-
-			if (!n.getParam("/elfin/impedance_controller/aic/b", B_))
-			{
-				ROS_ERROR("Cannot find aci/b");
-				return false;
-			}
-
-			if (!n.getParam("/elfin/impedance_controller/mode", experiment_mode_))
-			{
-				ROS_ERROR("Cannot find mode");
-				return false;
-			}
-
-			// command
-			sub_q_cmd_ = n.subscribe("command", 1, &ImpedanceController::commandCB, this);
-			sub_forcetorque_sensor_ = n.subscribe<geometry_msgs::WrenchStamped>("/elfin/elfin/ft_sensor_topic", 1, &ImpedanceController::updateFTsensor, this);
-
-			pub_SaveData_ = n.advertise<std_msgs::Float64MultiArray>("SaveData", 1000);
-
-			return true;
-		}
-
-		void starting(const ros::Time &time)
-		{
-			// get joint positions
-			for (size_t i = 0; i < n_joints_; i++)
-			{
-				ROS_INFO("JOINT %d", (int)i);
-				q_(i) = joints_[i].getPosition();
-				q_init_(i) = q_(i);
-				qdot_(i) = joints_[i].getVelocity();
-			}
-
-			time_ = 0.0;
-			total_time_ = 0.0;
-
-			ROS_INFO("Starting Impedance Controller");
-		}
-
-		void commandCB(const std_msgs::Float64MultiArrayConstPtr &msg)
-		{
-			if (msg->data.size() != n_joints_)
-			{
-				ROS_ERROR_STREAM("Dimension of command (" << msg->data.size() << ") does not match number of joints (" << n_joints_ << ")! Not executing!");
-				return;
-			}
-
-			for (unsigned int i = 0; i < n_joints_; i++)
-				q_cmd_sp_(i) = msg->data[i];
-		}
-
-		// void updateFTsensor(const geometry_msgs::WrenchStamped::ConstPtr &msg)
-		void updateFTsensor(const geometry_msgs::WrenchStamped::ConstPtr &msg)
-		{
-			// Convert Wrench msg to KDL wrench
-			geometry_msgs::Wrench f_meas = msg->wrench;
-
-			f_cur_[0] = f_meas.force.x;
-			f_cur_buffer_ = f_meas.force.y;
-			f_cur_[2] = f_meas.force.z;
-			f_cur_[3] = f_meas.torque.x;
-			f_cur_[4] = f_meas.torque.y;
-			f_cur_[5] = f_meas.torque.z;
-
-			if (experiment_mode_ == 1 || experiment_mode_ == 2)
-				f_cur_[1] = first_order_lowpass_filter();
-		}
-
-		// load gain is not permitted during controller loading?
-		void loadGainCB()
-		{
-		}
-
-		void update(const ros::Time &time, const ros::Duration &period)
-		{
-			// simple trajectory interpolation from joint command setpoint
-			dt_ = period.toSec();
-
-			if (total_time_ < 5.0)
-			{
-				task_init();
-			}
-			else if (total_time_ >= 5.0 && total_time_ < 6.0)
-			{
-				task_via();
-			}
-			else if (total_time_ >= 6.0 && total_time_ < 16.0)
-			{
-				task_ready();
-			}
-			else if (total_time_ >= 16.0 && total_time_ < 17.0)
-			{
-				task_via();
-			}
-			else if (total_time_ >= 17.0 && total_time_ < 27.0)
-			{
-				task_freespace();
-			}
-			else if (total_time_ >= 27.0 && total_time_ < 28.0)
-			{
-				task_via();
-			}
-			else if (total_time_ >= 28.0 && total_time_ < 48.0)
-			{
-				task_contactspace();
-			}
-			else if (total_time_ >= 48.0 && total_time_ < 49.0)
-			{
-				task_via();
-			}
-			else if (total_time_ >= 49.0 && total_time_ < 59.0)
-			{
-				task_homming();
-			}
-
-			// get joint states
-			for (size_t i = 0; i < n_joints_; i++)
-			{
-				q_(i) = joints_[i].getPosition();
-				qdot_(i) = joints_[i].getVelocity();
-			}
-
-			qddot_.data = (qdot_.data - qdot_old_.data) / dt_;
-
-			// error
-			KDL::JntArray q_error;
-			KDL::JntArray q_error_dot;
-			KDL::JntArray ded;
-			KDL::JntArray tde;
-			KDL::JntArray s;
-
-			q_error.data = Eigen::VectorXd::Zero(n_joints_);
-			q_error_dot.data = Eigen::VectorXd::Zero(n_joints_);
-			ded.data = Eigen::VectorXd::Zero(n_joints_);
-			tde.data = Eigen::VectorXd::Zero(n_joints_);
-			s.data = Eigen::VectorXd::Zero(n_joints_);
-
-			double db = 0.001;
-
-			q_error.data = q_cmd_.data - q_.data;
-			q_error_dot.data = qdot_cmd_.data - qdot_.data;
-
-			for (size_t i = 0; i < n_joints_; i++)
-			{
-				s(i) = q_error_dot(i) + Ramda_(i) * q_error(i);
-
-				if (db < Mbar_(i) && Mbar_(i) > Ramda_(i) / Alpha_(i))
-				{
-					Mbar_dot_(i) = Alpha_(i) * s(i) * s(i) - Alpha_(i) * Omega_(i) * Mbar_(i);
-				}
-
-				if (Mbar_(i) < db)
-				{
-					Mbar_(i) = db;
-				}
-
-				if (Mbar_(i) > Ramda_(i) / Alpha_(i))
-				{
-					Mbar_(i) = Ramda_(i) / Alpha_(i) - db;
-				}
-
-				Mbar_(i) = Mbar_(i) + dt_ * Mbar_dot_(i);
-			}
-
-			// torque command
-			for (size_t i = 0; i < n_joints_; i++)
-			{
-				ded(i) = qddot_cmd_(i) + 2.0 * Ramda_(i) * q_error(i) + Ramda_(i) * Ramda_(i) * q_error_dot(i);
-				tde(i) = tau_cmd_old_(i) - Mbar_(i) * qddot_(i);
-				tau_cmd_(i) = Mbar_(i) * ded(i) + tde(i);
-			}
-
-			for (size_t i = 0; i < n_joints_; i++)
-			{
-				joints_[i].setCommand(tau_cmd_(i));
-			}
-
-			tau_cmd_old_.data = tau_cmd_.data;
-			qdot_old_.data = qdot_.data;
-
-			KDL::Frame Xdes;
-
-			fk_solver_->JntToCart(q_cmd_, Xdes);
-
-			SaveData_[0] = total_time_;
-			SaveData_[1] = 0.122;
-			SaveData_[2] = Xdes.p(2);
-			SaveData_[3] = Fd_;
-			SaveData_[4] = f_cur_(1);
-			SaveData_[5] = f_cur_buffer_;
-			SaveData_[6] = B_buffer_;
-
-			msg_SaveData_.data.clear();
-
-			for (size_t i = 0; i < SaveDataMax; i++)
-			{
-				msg_SaveData_.data.push_back(SaveData_[i]);
-			}
-
-			pub_SaveData_.publish(msg_SaveData_);
-
-			time_ = time_ + dt_;
-			total_time_ = total_time_ + dt_;
-		}
-
-		void stopping(const ros::Time &time) {}
-
-		void task_via()
-		{
-			time_ = 0.0;
-
-			for (size_t i = 0; i < n_joints_; i++)
-			{
-				q_init_(i) = joints_[i].getPosition();
-				q_cmd_(i) = q_cmd_end_(i);
-				qdot_cmd_(i) = 0.0;
-				qddot_cmd_(i) = 0.0;
-			}
-		}
-
-		void task_init()
-		{
-			for (size_t i = 0; i < n_joints_; i++)
-			{
-				q_cmd_(i) = 0.0;
-				qdot_cmd_(i) = 0.0;
-				qddot_cmd_(i) = 0.0;
-			}
-
-			q_cmd_end_.data = q_cmd_.data;
-		}
-
-		void task_ready()
-		{
-			for (size_t i = 0; i < n_joints_; i++)
-			{
-				if (i == 2 || i == 4)
-				{
-					q_cmd_(i) = trajectory_generator_pos(q_init_(i), PI / 2.0, 10.0);
-					qdot_cmd_(i) = trajectory_generator_vel(q_init_(i), PI / 2.0, 10.0);
-					qddot_cmd_(i) = trajectory_generator_acc(q_init_(i), PI / 2.0, 10.0);
-				}
-				else
-				{
-					q_cmd_(i) = q_init_(i);
-					qdot_cmd_(i) = 0.0;
-					qddot_cmd_(i) = 0.0;
-				}
-			}
-
-			q_cmd_end_.data = q_cmd_.data;
-		}
-
-		void task_freespace()
-		{
-			KDL::Frame start;
-			KDL::Twist target_vel;
-			KDL::JntArray cart_cmd;
-
-			cart_cmd.data = Eigen::VectorXd::Zero(3);
-
-			fk_solver_->JntToCart(q_init_, start);
-
-			for (size_t i = 0; i < 6; i++)
-			{
-				if (i == 2)
-				{
-					target_vel(i) = trajectory_generator_vel(start.p(i), 0.122, 10.0);
-				}
-				else
-				{
-					target_vel(i) = 0.0;
-				}
-			}
-
-			ik_vel_solver_->CartToJnt(q_cmd_, target_vel, qdot_cmd_);
-
-			for (size_t i = 0; i < n_joints_; i++)
-			{
-				q_cmd_(i) = q_cmd_(i) + qdot_cmd_(i) * dt_;
-				qddot_cmd_(i) = (qdot_cmd_(i) - qdot_cmd_old_(i)) / dt_;
-				qdot_cmd_old_(i) = qdot_cmd_(i);
-			}
-
-			q_cmd_end_.data = q_cmd_.data;
-		}
-
-		void task_contactspace()
-		{
-			KDL::Frame start;
-
-			if (experiment_mode_ == 0 || experiment_mode_ == 1)
-				Fd_ = Fd_temp_;
-			else if (experiment_mode_ == 2)
-				Fd_ = Fd_temp_ * 1 / 5 * sin(2 * PI * 0.2 * total_time_) + Fd_temp_;
-
-			fk_solver_->JntToCart(q_init_, start);
-
-			for (size_t i = 0; i < 6; i++)
-			{
-				if (i == 0)
-				{
-					Xc_dot_(i) = trajectory_generator_vel(start.p(i), 0.5, 20.0);
-				}
-				else if (i == 2)
-				{
-					Fe_ = f_cur_[1];
-					PI_ = PI_old_ + dt_ * (Fd_old_ - Fe_old_) / B_;
-					B_buffer_ = B_ + del_B_;
-					Xc_ddot_(i) = 1 / M_ * ((Fe_ - Fd_) - (B_ + del_B_) * Xc_dot_old_(i));
-					Xc_dot_(i) = Xc_dot_old_(i) + Xc_ddot_(i) * dt_;
-					del_B_ = B_ / Xc_dot_(i) * PI_;
-					Xc_dot_old_(i) = Xc_dot_(i);
-					Fd_old_ = Fd_;
-					Fe_old_ = Fe_;
-					PI_old_ = PI_;
-				}
-				else
-				{
-					Xc_ddot_(i) = 0.0;
-					Xc_dot_(i) = 0.0;
-				}
-			}
-
-			ik_vel_solver_->CartToJnt(q_cmd_, Xc_dot_, qdot_cmd_);
-
-			for (size_t i = 0; i < n_joints_; i++)
-			{
-				q_cmd_(i) = q_cmd_(i) + qdot_cmd_(i) * dt_;
-				qddot_cmd_(i) = (qdot_cmd_(i) - qdot_cmd_old_(i)) / dt_;
-				qdot_cmd_old_(i) = qdot_cmd_(i);
-			}
-
-			q_cmd_end_.data = q_cmd_.data;
-		}
-
-		void task_homming()
-		{
-			for (size_t i = 0; i < n_joints_; i++)
-			{
-				q_cmd_(i) = trajectory_generator_pos(q_init_(i), 0.0, 10.0);
-				qdot_cmd_(i) = trajectory_generator_vel(q_init_(i), 0.0, 10.0);
-				qddot_cmd_(i) = trajectory_generator_acc(q_init_(i), 0.0, 10.0);
-			}
-
-			q_cmd_end_.data = q_cmd_.data;
-		}
-
-		double trajectory_generator_pos(double dStart, double dEnd, double dDuration)
-		{
-			double dA0 = dStart;
-			double dA3 = (20.0 * dEnd - 20.0 * dStart) / (2.0 * dDuration * dDuration * dDuration);
-			double dA4 = (30.0 * dStart - 30 * dEnd) / (2.0 * dDuration * dDuration * dDuration * dDuration);
-			double dA5 = (12.0 * dEnd - 12.0 * dStart) / (2.0 * dDuration * dDuration * dDuration * dDuration * dDuration);
-
-			return dA0 + dA3 * time_ * time_ * time_ + dA4 * time_ * time_ * time_ * time_ + dA5 * time_ * time_ * time_ * time_ * time_;
-		}
-
-		double trajectory_generator_vel(double dStart, double dEnd, double dDuration)
-		{
-			double dA0 = dStart;
-			double dA3 = (20.0 * dEnd - 20.0 * dStart) / (2.0 * dDuration * dDuration * dDuration);
-			double dA4 = (30.0 * dStart - 30 * dEnd) / (2.0 * dDuration * dDuration * dDuration * dDuration);
-			double dA5 = (12.0 * dEnd - 12.0 * dStart) / (2.0 * dDuration * dDuration * dDuration * dDuration * dDuration);
-
-			return 3.0 * dA3 * time_ * time_ + 4.0 * dA4 * time_ * time_ * time_ + 5.0 * dA5 * time_ * time_ * time_ * time_;
-		}
-
-		double trajectory_generator_acc(double dStart, double dEnd, double dDuration)
-		{
-			double dA0 = dStart;
-			double dA3 = (20.0 * dEnd - 20.0 * dStart) / (2.0 * dDuration * dDuration * dDuration);
-			double dA4 = (30.0 * dStart - 30 * dEnd) / (2.0 * dDuration * dDuration * dDuration * dDuration);
-			double dA5 = (12.0 * dEnd - 12.0 * dStart) / (2.0 * dDuration * dDuration * dDuration * dDuration * dDuration);
-
-			return 6.0 * dA3 * time_ + 12.0 * dA4 * time_ * time_ + 20.0 * dA5 * time_ * time_ * time_;
-		}
-
-		double first_order_lowpass_filter()
-		{
-			filt_ = (tau_ * filt_old_ + dt_ * f_cur_buffer_) / (tau_ + dt_);
-			filt_old_ = filt_;
-
-			return filt_;
-		}
-
-	private:
-		// joint handles
-		unsigned int n_joints_;
-		std::vector<std::string> joint_names_;
-		std::vector<hardware_interface::JointHandle> joints_;
-		std::vector<urdf::JointConstSharedPtr> joint_urdfs_;
-
-		// kdl
-		KDL::Tree kdl_tree_;
-		KDL::Chain kdl_chain_;
-		boost::scoped_ptr<KDL::ChainDynParam> id_solver_;
-		boost::scoped_ptr<KDL::ChainFkSolverPos> fk_solver_;
-		boost::scoped_ptr<KDL::ChainIkSolverVel_pinv> ik_vel_solver_;
-		boost::scoped_ptr<KDL::ChainIkSolverPos_NR_JL> ik_pos_solver_;
-		KDL::JntArray G_;
-		KDL::Vector gravity_;
-
-		// tdc gain
-		KDL::JntArray Mbar_, Mbar_dot_, Ramda_, Alpha_, Omega_;
-
-		// cmd, state
-		KDL::JntArray q_init_;
-		KDL::JntArray tau_cmd_, tau_cmd_old_;
-		KDL::JntArray q_cmd_, q_cmd_old_, qdot_cmd_, qdot_cmd_old_, qddot_cmd_;
-		KDL::JntArray q_cmd_end_;
-		KDL::JntArray q_cmd_sp_;
-		KDL::JntArray q_, qdot_, qdot_old_, qddot_;
-		KDL::Wrench f_cur_;
-		double f_cur_buffer_;
-
-		KDL::Twist Xc_dot_, Xc_dot_old_, Xc_ddot_;
-
-		double Xr_dot_, Xe_dot_;
-		double Xe_ddot_;
-
-		double Fd_, Fd_temp_, Fd_old_, Fe_, Fe_old_;
-		double M_, B_, del_B_, B_buffer_;
-		double PI_, PI_old_;
-
-		double dt_;
-		double time_;
-		double total_time_;
-
-		double filt_old_;
-		double filt_;
-		double tau_;
-
-		int experiment_mode_;
-
-		// topic
-		ros::Subscriber sub_q_cmd_;
-		ros::Subscriber sub_forcetorque_sensor_;
-
-		double SaveData_[SaveDataMax];
-
-		ros::Publisher pub_SaveData_;
-
-		std_msgs::Float64MultiArray msg_SaveData_;
-	};
-}
-
+class ImpedanceController : public controller_interface::Controller<hardware_interface::EffortJointInterface>
+{
+  public:
+  
+       bool init(hardware_interface::EffortJointInterface *hw, ros::NodeHandle &n)
+    {
+        // ********* 1. Get joint name / gain from the parameter server *********
+        // 1.1 Joint Name
+        if (!n.getParam("joints", joint_names_))
+        {
+            ROS_ERROR("Could not find joint name");
+            return false;
+        }
+        n_joints_ = joint_names_.size();
+
+        if (n_joints_ == 0)
+        {
+            ROS_ERROR("List of joint names is empty.");
+            return false;
+        }
+        else
+        {
+            ROS_INFO("Found %d joint names", n_joints_);
+            for (int i = 0; i < n_joints_; i++)
+            {
+                ROS_INFO("%s", joint_names_[i].c_str());
+            }
+        }
+
+        // 1.2 Gain
+        // 1.2.1 Joint Controller
+        J_.resize(kdl_chain_.getNrOfJoints());
+        J_inv_.resize(kdl_chain_.getNrOfJoints());
+        J_trans_.resize(kdl_chain_.getNrOfJoints());
+        J_temp_.resize(kdl_chain_.getNrOfJoints());
+        Kp_.resize(n_joints_);
+        Kd_.resize(n_joints_);
+        Ki_.resize(n_joints_);
+
+        std::vector<double> Kp(n_joints_), Ki(n_joints_), Kd(n_joints_);
+        for (size_t i = 0; i < n_joints_; i++)
+        {
+            std::string si = boost::lexical_cast<std::string>(i + 1);
+            if (n.getParam("/elfin/impedance_controller/joint" + si + "/pid/p", Kp[i]))
+            {
+                Kp_(i) = Kp[i];
+            }
+            else
+            {
+                std::cout << "/elfin/impedance_controller/joint" + si + "/pid/p" << std::endl;
+                ROS_ERROR("Cannot find pid/p gain");
+                return false;
+            }
+
+
+            if (n.getParam("/elfin/impedance_controller/joint" + si + "/pid/i", Ki[i]))
+            {
+                Ki_(i) = Ki[i];
+            }
+            else
+            {
+                ROS_ERROR("Cannot find pid/i gain");
+                return false;
+            }
+
+            if (n.getParam("/elfin/impedance_controller/joint" + si + "/pid/d", Kd[i]))
+            {
+                Kd_(i) = Kd[i];
+            }
+            else
+            {
+                ROS_ERROR("Cannot find pid/d gain");
+                return false;
+            }
+        }
+
+        // 2. ********* urdf *********
+        urdf::Model urdf;
+        if (!urdf.initParam("/elfin/robot_description"))
+        {
+            ROS_ERROR("Failed to parse urdf file");
+            return false;
+        }
+        else
+        {
+            ROS_INFO("Found robot_description");
+        }
+
+        // 3. ********* Get the joint object to use in the realtime loop [Joint Handle, URDF] *********
+        for (int i = 0; i < n_joints_; i++)
+        {
+            try
+            {
+                joints_.push_back(hw->getHandle(joint_names_[i]));
+            }
+            catch (const hardware_interface::HardwareInterfaceException &e)
+            {
+                ROS_ERROR_STREAM("Exception thrown: " << e.what());
+                return false;
+            }
+
+            urdf::JointConstSharedPtr joint_urdf = urdf.getJoint(joint_names_[i]);
+            if (!joint_urdf)
+            {
+                ROS_ERROR("Could not find joint '%s' in urdf", joint_names_[i].c_str());
+                return false;
+            }
+            joint_urdfs_.push_back(joint_urdf);
+        }
+
+        // 4. ********* KDL *********
+        // 4.1 kdl parser
+        if (!kdl_parser::treeFromUrdfModel(urdf, kdl_tree_))
+        {
+            ROS_ERROR("Failed to construct kdl tree");
+            return false;
+        }
+        else
+        {
+            ROS_INFO("Constructed kdl tree");
+        }
+
+        // 4.2 kdl chain
+        std::string root_name, tip_name;
+        if (!n.getParam("root_link", root_name))
+        {
+            ROS_ERROR("Could not find root link name");
+            return false;
+        }
+        if (!n.getParam("tip_link", tip_name))
+        {
+            ROS_ERROR("Could not find tip link name");
+            return false;
+        }
+        if (!kdl_tree_.getChain(root_name, tip_name, kdl_chain_))
+        {
+            ROS_ERROR_STREAM("Failed to get KDL chain from tree: ");
+            ROS_ERROR_STREAM("  " << root_name << " --> " << tip_name);
+            ROS_ERROR_STREAM("  Tree has " << kdl_tree_.getNrOfJoints() << " joints");
+            ROS_ERROR_STREAM("  Tree has " << kdl_tree_.getNrOfSegments() << " segments");
+            ROS_ERROR_STREAM("  The segments are:");
+
+            KDL::SegmentMap segment_map = kdl_tree_.getSegments();
+            KDL::SegmentMap::iterator it;
+
+            for (it = segment_map.begin(); it != segment_map.end(); it++)
+                ROS_ERROR_STREAM("    " << (*it).first);
+
+            return false;
+        }
+        else
+        {
+            ROS_INFO("Got kdl chain");
+        }
+
+
+        // 4.3 inverse dynamics solver 초기화
+        gravity_ = KDL::Vector::Zero(); // ?
+        gravity_(2) = -9.81;            // 0: x-axis 1: y-axis 2: z-axis
+
+        id_solver_.reset(new KDL::ChainDynParam(kdl_chain_, gravity_));
+        inv_solver_.reset(new KDL::ChainIkSolverVel_pinv(kdl_chain_));
+        jnt_to_jac_solver_.reset(new KDL::ChainJntToJacSolver(kdl_chain_));
+        fk_pos_solver_.reset(new KDL::ChainFkSolverPos_recursive(kdl_chain_));
+
+        tau_d_.data = Eigen::VectorXd::Zero(n_joints_);
+
+        qd_.data = Eigen::VectorXd::Zero(n_joints_);
+        qd_dot_.data = Eigen::VectorXd::Zero(n_joints_);
+        qd_ddot_.data = Eigen::VectorXd::Zero(n_joints_);
+        qd_old_.data = Eigen::VectorXd::Zero(n_joints_);
+        
+        q_.data = Eigen::VectorXd::Zero(n_joints_);
+        qdot_.data = Eigen::VectorXd::Zero(n_joints_);
+        q_dot_cmd_.data = Eigen::VectorXd::Zero(n_joints_);
+
+        e_.data = Eigen::VectorXd::Zero(n_joints_);
+        e_dot_.data = Eigen::VectorXd::Zero(n_joints_);
+        e_int_.data = Eigen::VectorXd::Zero(n_joints_);
+        Vcmd_jnt_.data = Eigen::VectorXd::Zero(n_joints_);
+
+        // input initialization
+        y_.data = Eigen::VectorXd::Zero(n_joints_);
+        Vd_jnt_.data = Eigen::VectorXd::Zero(n_joints_);
+
+        // 5.2 Matrix 
+        M_.resize(kdl_chain_.getNrOfJoints());
+        C_.resize(kdl_chain_.getNrOfJoints());
+        G_.resize(kdl_chain_.getNrOfJoints());
+        Jd_.resize(kdl_chain_.getNrOfJoints());
+        J_.resize(kdl_chain_.getNrOfJoints());
+        
+        // 6.1 publisher
+        pub_qd_ = n.advertise<std_msgs::Float64MultiArray>("qd", 1000);
+        pub_q_ = n.advertise<std_msgs::Float64MultiArray>("q", 1000);
+        pub_e_ = n.advertise<std_msgs::Float64MultiArray>("e", 1000);
+
+        pub_SaveData_ = n.advertise<std_msgs::Float64MultiArray>("SaveData", 1000); // 뒤에 숫자는?
+
+        vel_cmd_ = n.subscribe("command/test", 1000, &ImpedanceController::command_vel_callback, this);
+
+        // 6.2 action server
+        return true;
+    }
+
+    void commandCB(const std_msgs::Float64MultiArrayConstPtr &msg)
+    {
+        if (msg->data.size() != n_joints_)
+        {
+            ROS_ERROR_STREAM("Dimension of command (" << msg->data.size() << ") does not match number of joints (" << n_joints_ << ")! Not executing!");
+            return;
+        }
+    }
+
+    void command_vel_callback(geometry_msgs::TwistConstPtr msg) {
+        q_dot_cmd_(0) = msg->linear.x; 
+        q_dot_cmd_(1) = msg->linear.y;
+        q_dot_cmd_(2) = msg->linear.z;
+        q_dot_cmd_(3) = msg->angular.x;
+        q_dot_cmd_(4) = msg->angular.y;
+        q_dot_cmd_(5) = msg->angular.z;
+    }
+
+    void starting(const ros::Time &time)
+    {
+        t = 0.0;
+        ROS_INFO("Starting Computed Velocity Controller");
+    }
+
+    void update(const ros::Time &time, const ros::Duration &period)
+    {
+        // ********* 0. Get states from gazebo *********
+        // 0.1 sampling time
+        double dt = period.toSec();
+        t = t + dt;
+        // 0.2 joint state feedback from the model
+        for (int i = 0; i < n_joints_; i++)
+        {
+            q_(i) = joints_[i].getPosition();
+            qdot_(i) = joints_[i].getVelocity();
+        }
+
+        // ********* 2.2 Velocity controller *********
+
+        // given of q_dot_cmd_
+
+        e_dot_.data = q_dot_cmd_.data - qdot_.data; // error for the joint velocity from wanted speed and joint speed
+
+        id_solver_->JntToMass(q_, M_);
+        id_solver_->JntToCoriolis(q_, qdot_, C_);
+        id_solver_->JntToGravity(q_, G_); 
+
+        //y = M * (feed forward + Kd * error in velocity)
+        y_.data = qd_ddot_.data + Kd_.data.cwiseProduct(e_dot_.data);
+
+        aux_d_.data = M_.data * y_.data;
+        comp_d_.data = C_.data + G_.data;
+        tau_d_.data = aux_d_.data + comp_d_.data;
+        
+        for (int i = 0; i < n_joints_; i++)
+        {
+            joints_[i].setCommand(tau_d_(i)); 
+        }
+
+        //print_state();
+        save_data();
+    }
+
+    void stopping(const ros::Time &time)
+    {
+    }
+
+    void save_data()
+    {
+        // 1
+        // Simulation time (unit: sec)
+        SaveData_[0] = t;
+
+        // Desired position in joint space (unit: rad)
+        SaveData_[1] = qd_(0);
+        SaveData_[2] = qd_(1);
+        SaveData_[3] = qd_(2);
+        SaveData_[4] = qd_(3);
+        SaveData_[5] = qd_(4);
+        SaveData_[6] = qd_(5);
+
+        // Desired velocity in joint space (unit: rad/s)
+        SaveData_[7] = qd_dot_(0);
+        SaveData_[8] = qd_dot_(1);
+        SaveData_[9] = qd_dot_(2);
+        SaveData_[10] = qd_dot_(3);
+        SaveData_[11] = qd_dot_(4);
+        SaveData_[12] = qd_dot_(5);
+
+        // Desired acceleration in joint space (unit: rad/s^2)
+        SaveData_[13] = qd_ddot_(0);
+        SaveData_[14] = qd_ddot_(1);
+        SaveData_[15] = qd_ddot_(2);
+        SaveData_[16] = qd_ddot_(3);
+        SaveData_[17] = qd_ddot_(4);
+        SaveData_[18] = qd_ddot_(5);
+
+        // Actual position in joint space (unit: rad)
+        SaveData_[19] = q_(0);
+        SaveData_[20] = q_(1);
+        SaveData_[21] = q_(2);
+        SaveData_[22] = q_(3);
+        SaveData_[23] = q_(4);
+        SaveData_[24] = q_(5);
+
+        // Actual velocity in joint space (unit: rad/s)
+        SaveData_[25] = qdot_(0);
+        SaveData_[26] = qdot_(1);
+        SaveData_[27] = qdot_(2);
+        SaveData_[28] = qdot_(3);
+        SaveData_[29] = qdot_(4);
+        SaveData_[30] = qdot_(5);
+
+        // Error position in joint space (unit: rad)
+        SaveData_[31] = e_(0);
+        SaveData_[32] = e_(1);
+        SaveData_[33] = e_(2);
+        SaveData_[34] = e_(3);
+        SaveData_[35] = e_(4);
+        SaveData_[36] = e_(5);
+
+        // Error velocity in joint space (unit: rad/s)
+        SaveData_[37] = e_dot_(0);
+        SaveData_[38] = e_dot_(1);
+        SaveData_[39] = e_dot_(2);
+        SaveData_[40] = e_dot_(3);
+        SaveData_[41] = e_dot_(4);
+        SaveData_[42] = e_dot_(5);
+
+        // Error intergal value in joint space (unit: rad*sec)
+        SaveData_[43] = e_int_(0);
+        SaveData_[44] = e_int_(1);
+        SaveData_[45] = e_int_(2);
+        SaveData_[46] = e_int_(3);
+        SaveData_[47] = e_int_(4);
+        SaveData_[48] = e_int_(5);
+
+        // error in the task space
+        SaveData_[43] = Xerr_(0);
+        SaveData_[44] = Xerr_(1);
+        SaveData_[45] = Xerr_(2);
+        SaveData_[46] = Xerr_(3);
+        SaveData_[47] = Xerr_(4);
+        SaveData_[48] = Xerr_(5);
+
+        // 2
+        msg_qd_.data.clear();
+        msg_q_.data.clear();
+        msg_e_.data.clear();
+
+        msg_SaveData_.data.clear();
+
+        // 3
+        for (int i = 0; i < n_joints_; i++)
+        {
+            msg_qd_.data.push_back(qd_(i));
+            msg_q_.data.push_back(q_(i));
+            msg_e_.data.push_back(e_(i));
+        }
+
+        for (int i = 0; i < SaveDataMax; i++)
+        {
+            msg_SaveData_.data.push_back(SaveData_[i]);
+        }
+
+        // 4
+        pub_qd_.publish(msg_qd_);
+        pub_q_.publish(msg_q_);
+        pub_e_.publish(msg_e_);
+
+        pub_SaveData_.publish(msg_SaveData_);
+    }
+
+    void print_state()
+    {
+        static int count = 0;
+        if (count > 99)
+        {
+            printf("*********************************************************\n\n");
+            printf("*** Simulation Time (unit: sec)  ***\n");
+            printf("t = %f\n", t);
+            printf("\n");
+
+            printf("*** Desired State in Joint Space (unit: deg) ***\n");
+            printf("qd_(0): %f, ", qd_(0)*R2D);
+            printf("qd_(1): %f, ", qd_(1)*R2D);
+            printf("qd_(2): %f, ", qd_(2)*R2D);
+            printf("qd_(3): %f, ", qd_(3)*R2D);
+            printf("qd_(4): %f, ", qd_(4)*R2D);
+            printf("qd_(5): %f\n", qd_(5)*R2D);
+            printf("\n");
+
+            printf("*** Actual State in Joint Space (unit: deg) ***\n");
+            printf("q_(0): %f, ", q_(0) * R2D);
+            printf("q_(1): %f, ", q_(1) * R2D);
+            printf("q_(2): %f, ", q_(2) * R2D);
+            printf("q_(3): %f, ", q_(3) * R2D);
+            printf("q_(4): %f, ", q_(4) * R2D);
+            printf("q_(5): %f\n", q_(5) * R2D);
+            printf("\n");
+
+
+            printf("*** Joint Space Error (unit: deg)  ***\n");
+            printf("%f, ", R2D * e_(0));
+            printf("%f, ", R2D * e_(1));
+            printf("%f, ", R2D * e_(2));
+            printf("%f, ", R2D * e_(3));
+            printf("%f, ", R2D * e_(4));
+            printf("%f\n", R2D * e_(5));
+            printf("\n");
+
+
+            count = 0;
+        }
+        count++;
+    }
+
+  private:
+    // others
+    double t;
+
+    //Joint handles
+    unsigned int n_joints_;                               // amount of joints
+    std::vector<std::string> joint_names_;                // joint names from the urdf
+    std::vector<hardware_interface::JointHandle> joints_; // hw interface for the ros control package which allows the interfacing with the joints
+    std::vector<urdf::JointConstSharedPtr> joint_urdfs_;  // Joints from the urdf
+
+    // kdl
+    KDL::Tree kdl_tree_;   // kinematic tree based of the model urdf downloaded from the parameter server
+    KDL::Chain kdl_chain_; // chain of the kinematic tree
+
+    // kdl M,C,G
+    KDL::JntSpaceInertiaMatrix M_; // intertia matrix
+    KDL::JntArray C_;              // coriolis
+    KDL::JntArray G_;              // gravity torque vector
+    KDL::Vector gravity_;
+    KDL::Jacobian J_;
+    KDL::Jacobian Jd_;
+    KDL::Jacobian J_inv_;
+    KDL::Jacobian J_trans_;
+    KDL::Jacobian J_temp_;
+
+    // kdl solver
+    boost::scoped_ptr<KDL::ChainDynParam> id_solver_;                  // Solver To compute the inverse dynamics
+    boost::scoped_ptr<KDL::ChainJntToJacSolver> jnt_to_jac_solver_; // solver for jacobian
+    boost::scoped_ptr<KDL::ChainFkSolverPos_recursive> fk_pos_solver_;
+    boost::scoped_ptr<KDL::ChainIkSolverVel_pinv> inv_solver_;
+
+    // Joint Space State
+    KDL::JntArray qd_, qd_dot_, qd_ddot_, q_dot_cmd_;
+    KDL::JntArray qd_old_;
+    KDL::JntArray q_, qdot_;
+    KDL::JntArray e_, e_dot_, e_int_;
+
+    KDL::JntArray Vd_jnt_;
+
+    KDL::JntArray y_;
+    KDL::JntArray Vcmd_jnt_;
+    // Input
+    KDL::JntArray aux_d_;
+    KDL::JntArray comp_d_;
+    KDL::JntArray tau_d_;
+
+    // frames
+    KDL::Frame x_; // end effector frame
+    KDL::Frame xd_; // end effector desired frame
+    
+    // twists
+    KDL::Twist Xerr_;
+    KDL::Twist Vd_;
+    KDL::Twist Vcmd_;
+
+    //
+    KDL::JntArray Kp_, Ki_, Kd_;
+
+    // save the data
+    double SaveData_[SaveDataMax];
+
+    // ros publisher
+    ros::Publisher pub_qd_, pub_q_, pub_e_;
+    ros::Publisher pub_SaveData_;
+    
+    ros::Subscriber vel_cmd_;
+
+    // ros message
+    std_msgs::Float64MultiArray msg_qd_, msg_q_, msg_e_;
+    std_msgs::Float64MultiArray msg_SaveData_;
+
+    // params for using different controller types and calculations
+    bool task_space;
+    bool frame_error_;
+
+    float t_ = 1.0;
+};
+}; // namespace arm_controllers
 PLUGINLIB_EXPORT_CLASS(arm_controllers::ImpedanceController, controller_interface::ControllerBase)
