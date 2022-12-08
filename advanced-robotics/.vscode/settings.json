@@ -1,0 +1,9 @@
+{
+    "python.autoComplete.extraPaths": [
+        "/home/wks-99389-nlt/Documents/Cources/Advanced_Robotics/Codes/devel/lib/python3/dist-packages",
+        "/opt/ros/noetic/lib/python3/dist-packages",
+        "/home/wks-99389-nlt/Documents/PathFollowerProject/PlayGround/TestTheCode/install/pf_interfaces/lib/python3.8/site-packages",
+        "/opt/ros/foxy/lib/python3.8/site-packages",
+        "/usr/local/MATLAB/R2022b/sys/ros2/glnxa64/ros2/lib/python3.9/site-packages"
+    ]
+}

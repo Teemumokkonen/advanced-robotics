@@ -1,0 +1,25 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${default}",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/home/wks-99389-nlt/Documents/Cources/Advanced_Robotics/Codes/devel/include/**",
+        "/opt/ros/noetic/include/**",
+        "/home/wks-99389-nlt/Documents/PathFollowerProject/PlayGround/TestTheCode/install/pf_interfaces/include/**",
+        "/usr/local/MATLAB/R2022b/sys/ros2/glnxa64/ros2/include/**",
+        "/home/wks-99389-nlt/Documents/PathFollowerProject/TheProject/BuildFiles/install/include/**",
+        "/home/wks-99389-nlt/Documents/Cources/Advanced_Robotics/Codes/src/advanced-robotics/advanced-robotics/arm_controllers/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ROS",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++14"
+    }
+  ],
+  "version": 4
+}

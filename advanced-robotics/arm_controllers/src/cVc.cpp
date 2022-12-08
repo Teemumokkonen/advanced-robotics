@@ -276,13 +276,14 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
         }
     }
 
-    void command_vel_callback(geometry_msgs::TwistConstPtr msg) {
-        q_dot_cmd_(0) = msg->linear.x; 
-        q_dot_cmd_(1) = msg->linear.y;
-        q_dot_cmd_(2) = msg->linear.z;
-        q_dot_cmd_(3) = msg->angular.x;
-        q_dot_cmd_(4) = msg->angular.y;
-        q_dot_cmd_(5) = msg->angular.z;
+    void command_vel_callback(const std_msgs::Float64MultiArrayConstPtr &msg) {
+        for(int i = 0; i < n_joints_; i++){
+            y_(i) = msg->data[i];
+            //qd_(i) = msg->data[3*i];
+            //qd_dot_(i) = msg->data[3*i + 1];
+            //qd_ddot_(i) = msg->data[3*i + 2];
+            //q_dot_cmd_(0) = msg.data[0]; 
+        }
     }
 
     void starting(const ros::Time &time)
@@ -307,15 +308,16 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
         // ********* 2.2 Velocity controller *********
 
         // given of q_dot_cmd_
-
-        e_dot_.data = q_dot_cmd_.data - qdot_.data; // error for the joint velocity from wanted speed and joint speed
+        //e_.data = qd_.data - q_.data;
+        //e_dot_.data = qd_dot_.data - qdot_.data; // error for the joint velocity from wanted speed and joint speed
+        //e_int_.data = e_int_.data + e_.data * dt;
 
         id_solver_->JntToMass(q_, M_);
         id_solver_->JntToCoriolis(q_, qdot_, C_);
         id_solver_->JntToGravity(q_, G_); 
 
         //y = M * (feed forward + Kd * error in velocity)
-        y_.data = qd_ddot_.data + Kd_.data.cwiseProduct(e_dot_.data);
+        //y_.data = qd_ddot_.data + Kd_.data.cwiseProduct(e_dot_.data) + Kp_.data.cwiseProduct(e_.data) + Ki_.data.cwiseProduct(e_int_.data);
 
         aux_d_.data = M_.data * y_.data;
         comp_d_.data = C_.data + G_.data;
@@ -424,8 +426,10 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
         {
             msg_qd_.data.push_back(qd_(i));
             msg_q_.data.push_back(q_(i));
+            msg_q_.data.push_back(qdot_(i));
             msg_e_.data.push_back(e_(i));
         }
+        msg_q_.data.push_back(t);
 
         for (int i = 0; i < SaveDataMax; i++)
         {

@@ -14,17 +14,23 @@ elfin:
         - elfin_joint6
       gains:
         elfin_joint1: 
-          pid: {p: 100.0, i: 0, d: 50.0}
+          pid: {p: 1000.0, i: 10, d: 50.0}
+          pid_ws: {p: 500.0, i: 10, d: 120.0}
         elfin_joint2: 
-          pid: {p: 100.0, i: 0, d: 50.0}
+          pid: {p: 1000.0, i: 10, d: 50.0}
+          pid_ws: {p: 500.0, i: 10, d: 120.0}
         elfin_joint3: 
-          pid: {p: 100.0, i: 0, d: 50.0}
+          pid: {p: 2000.0, i: 10, d: 50.0}
+          pid_ws: {p: 500.0, i: 10, d: 120.0}
         elfin_joint4: 
-          pid: {p: 100.0, i: 0, d: 50.0}
+          pid: {p: 1000.0, i: 10, d: 50.0}
+          pid_ws: {p: 500.0, i: 10, d: 120.0}
         elfin_joint5: 
-          pid: {p: 100.0, i: 0, d: 50.0}
+          pid: {p: 1000.0, i: 10, d: 50.0}
+          pid_ws: {p: 500.0, i: 10, d: 120.0}
         elfin_joint6: 
-          pid: {p: 100.0, i: 0, d: 50.0}
+          pid: {p: 1000.0, i: 30, d: 50.0}
+          pid_ws: {p: 500.0, i: 30, d: 120.0}
       root_link: world
       tip_link: elfin_link6
       Joint_space: false # define if the command calculations are done in the joint space or in task space

@@ -19,6 +19,7 @@
 #include <kdl/treejnttojacsolver.hpp>
 #include <kdl/chainfksolverpos_recursive.hpp>
 #include <kdl/chainiksolvervel_pinv.hpp>
+#include <kdl/chainjnttojacdotsolver.hpp>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -43,16 +44,22 @@ class trajectory_planner {
         bool init(ros::NodeHandle n) {
             // init the action client
             pose_subs_ = n.subscribe<std_msgs::Float64MultiArray>("elfin/cvc/q", 1000, &trajectory_planner::pose_callback, this);
+            des_subs = n.subscribe<std_msgs::Float64MultiArray>("/planner/des_frame", 1000, &trajectory_planner::des_callback, this);
             target_pose_subs_ = n.subscribe<geometry_msgs::TransformStamped>("target_pose", 1000, &trajectory_planner::target_pose_callback, this);
             twist_error_pub_ = n.advertise<geometry_msgs::Twist>("Xerr_", 1000);
-            vel_pub_ = n.advertise<geometry_msgs::Twist>("/elfin/cvc/command/test", 1000);
+            vel_pub_ = n.advertise<std_msgs::Float64MultiArray>("/elfin/cvc/command/test", 1000);
 
             n_joints_ = 6;
             q_.data = Eigen::VectorXd::Zero(n_joints_);
+            q_dot_.data = Eigen::VectorXd::Zero(n_joints_);
             qd_set_.data = Eigen::VectorXd::Zero(n_joints_);
             qd_.data = Eigen::VectorXd::Zero(n_joints_);
             qd_dot.data = Eigen::VectorXd::Zero(n_joints_);
             qd_ddot.data = Eigen::VectorXd::Zero(n_joints_);
+
+            qdes_.data = Eigen::VectorXd::Zero(n_joints_);
+            qdes_dot_.data = Eigen::VectorXd::Zero(n_joints_);
+            qdes_ddot_.data = Eigen::VectorXd::Zero(n_joints_);
 
             urdf::Model urdf;
             if (!urdf.initParam("robot_description"))
@@ -108,6 +115,98 @@ class trajectory_planner {
                 ROS_INFO("Got kdl chain");
             }
 
+            //Getting the gains
+
+            ex_.data = Eigen::VectorXd::Zero(n_joints_);
+            xdes_dot_.data = Eigen::VectorXd::Zero(n_joints_);
+            xdes_ddot_.data = Eigen::VectorXd::Zero(n_joints_);
+            xee_dot_.data = Eigen::VectorXd::Zero(n_joints_);
+            ex_dot_.data = Eigen::VectorXd::Zero(n_joints_);
+            ex_int_.data = Eigen::VectorXd::Zero(n_joints_);
+            Kp_.resize(n_joints_);
+            Kd_.resize(n_joints_);
+            Ki_.resize(n_joints_);
+
+            Kp_ws_.resize(n_joints_);
+            Kd_ws_.resize(n_joints_);
+            Ki_ws_.resize(n_joints_);
+
+            std::vector<double> Kp(n_joints_), Ki(n_joints_), Kd(n_joints_);
+            for (size_t i = 0; i < n_joints_; i++)
+            {
+                std::string si = boost::lexical_cast<std::string>(i + 1);
+                if (n.getParam("/elfin/cvc/gains/elfin_joint" + si + "/pid/p", Kp[i]))
+                {
+                    Kp_(i) = Kp[i];
+                }
+                else
+                {
+                    std::cout << "/elfin/cVc/gains/elfin_joint" + si + "/pid/p" << std::endl;
+                    ROS_ERROR("Cannot find pid/p gain");
+                    return false;
+                }
+
+                if (n.getParam("/elfin/cvc/gains/elfin_joint" + si + "/pid/i", Ki[i]))
+                {
+                    Ki_(i) = Ki[i];
+                }
+                else
+                {
+                    ROS_ERROR("Cannot find pid/i gain");
+                    return false;
+                }
+
+                if (n.getParam("/elfin/cvc/gains/elfin_joint" + si + "/pid/d", Kd[i]))
+                {
+                    Kd_(i) = Kd[i];
+                }
+                else
+                {
+                    ROS_ERROR("Cannot find pid/d gain");
+                    return false;
+                }
+                //
+                if (n.getParam("/elfin/cvc/gains/elfin_joint" + si + "/pid_ws/p", Kp[i]))
+                {
+                    Kp_ws_(i) = Kp[i];
+                }
+                else
+                {
+                    std::cout << "/elfin/cVc/gains/elfin_joint" + si + "/pid_ws/p" << std::endl;
+                    ROS_ERROR("Cannot find pid_ws/p gain");
+                    return false;
+                }
+
+                if (n.getParam("/elfin/cvc/gains/elfin_joint" + si + "/pid_ws/i", Ki[i]))
+                {
+                    Ki_ws_(i) = Ki[i];
+                }
+                else
+                {
+                    ROS_ERROR("Cannot find pid_ws/i gain");
+                    return false;
+                }
+
+                if (n.getParam("/elfin/cvc/gains/elfin_joint" + si + "/pid_ws/d", Kd[i]))
+                {
+                    Kd_ws_(i) = Kd[i];
+                }
+                else
+                {
+                    ROS_ERROR("Cannot find pid_ws/d gain");
+                    return false;
+                }
+            }
+            
+            y_.data = Eigen::VectorXd::Zero(n_joints_);
+            e_.data = Eigen::VectorXd::Zero(n_joints_);
+            e_dot_.data = Eigen::VectorXd::Zero(n_joints_);
+            e_int_.data = Eigen::VectorXd::Zero(n_joints_);
+            time = 0;
+            dt = 0;
+
+            ///
+
             J_.resize(kdl_chain_.getNrOfJoints());
             J2_.resize(6);
             J3_.resize(6);
@@ -124,6 +223,7 @@ class trajectory_planner {
             jnt_to_jac_solver_.reset(new KDL::ChainJntToJacSolver(kdl_chain_));
         
             TreeJntToJacSolver_.reset(new KDL::TreeJntToJacSolver(kdl_tree_));
+            //jnt_to_jac_dot_solver_.reset(new KDL::ChainJntToJacDotSolver(kdl_chain_));
             init_pose();
             init_obs();
             return true;
@@ -153,12 +253,35 @@ class trajectory_planner {
             xd_.M = xd_.M.RPY(0.0, 0.0, 0.1);
         }
 
+        void des_callback(const std_msgs::Float64MultiArrayConstPtr &msg){
+            //ROS_INFO("first msg: %f", msg->data[0]);
+
+            xdes_.p(0) = msg->data[0];
+            xdes_.p(1) = msg->data[1];
+            xdes_.p(2) = msg->data[2];
+            xdes_.M = KDL::Rotation(KDL::Rotation::RPY(msg->data[3], msg->data[4], msg->data[5]));
+
+            for(int i = 0; i < 6; i++){
+                xdes_dot_.data[i] = msg->data[i+6];
+                xdes_ddot_.data[i] = msg->data[i + 12];
+            }
+        }
         void pose_callback(const std_msgs::Float64MultiArrayConstPtr &msg) {
         for (int i = 0; i < n_joints_; i++)
         {
-            q_(i) = msg->data[i];
+            q_(i) = msg->data[2*i];
+            q_dot_(i) = msg->data[2*i+1];
         }
+        double time_past = time;
+        time = msg->data[12];
+        dt = abs(time - time_past);
+        if (dt > 1){dt = 0;}
 
+        fk_pos_solver_->JntToCart(q_, xee_); // end effector poss 
+        
+
+///////////////////
+        
         fk_pos_solver_->JntToCart(q_, x_2_, 3);
         fk_pos_solver_->JntToCart(q_, x_3_, 4);
         fk_pos_solver_->JntToCart(q_, x_4_, 5);
@@ -191,7 +314,26 @@ class trajectory_planner {
         Jac_vec_[3] = J4_;
         Jac_vec_[4] = J5_; 
         Jac_vec_[5] = J6_; 
+//////////////////////////////
+        xee_dot_.data = J_.data * q_dot_.data;
 
+        //J_inv_.data = J_.data.inverse(); // inverse of the jacobian 
+        float det = J_.data.determinant();
+        J_trans_.data = J_.data.transpose();
+        Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n_joints_, n_joints_);
+        // check for the singulatities
+        if (-0.0001 < det && det < 0.0001) {
+            ROS_INFO("Singularity detected");
+
+            J_temp_.data = (J_.data * J_trans_.data + 200 * (0.0001 - abs(det)) * I);
+            J_inv_.data = J_trans_.data * J_temp_.data.inverse();
+        }
+        else {
+            //J_temp_.data = (J_.data * J_trans_.data + 0 * (0.001 - abs(det)) * I);
+            //J_temp_.data = J_trans_.data * J_temp_.data.inverse();
+            J_inv_.data = J_.data.inverse();// * fmin(1, (1-(0.005 - abs(det))/0.004)) + J_temp_.data * fmax(0, (0.005 - abs(det))/0.004); 
+        }
+        //jnt_to_jac_dot_solver_.JntToJacDot(q_, jac_dot_, -1);
         calc_diff();
         
         }
@@ -214,8 +356,6 @@ class trajectory_planner {
 
             //Xerr_ =  15.0 * diff(x_, xd_) / t_; // error from the frame
             
-            J_inv_.data = J_.data.inverse(); // inverse of the jacobian 
-            J_trans_.data = J_.data.transpose();
 
             Vcmd_ = Xerr_;
             //inv_solver_->CartToJnt(q_, Vcmd_, Vcmd_jnt_);
@@ -252,32 +392,32 @@ class trajectory_planner {
 
             if (print_state == 100) {
 
-                ROS_INFO("\r");
+                //ROS_INFO("\r");
 
-                ROS_INFO("target frame x %f", xd_.p(0));
-                ROS_INFO("target frame y %f", xd_.p(1));
-                ROS_INFO("target frame z %f", xd_.p(2));
+                //ROS_INFO("target frame x %f", xd_.p(0));
+                //ROS_INFO("target frame y %f", xd_.p(1));
+                //ROS_INFO("target frame z %f", xd_.p(2));
                 
-                ROS_INFO("current frame x %f", x_.p(0));
-                ROS_INFO("current frame y %f", x_.p(1));
-                ROS_INFO("current frame z %f", x_.p(2));
+                //ROS_INFO("current frame x %f", x_.p(0));
+                //ROS_INFO("current frame y %f", x_.p(1));
+                //ROS_INFO("current frame z %f", x_.p(2));
 
-                ROS_INFO("\r");
+                //ROS_INFO("\r");
 
-                ROS_INFO("repulsive joint 1: %f", q(0));
-                ROS_INFO("repulsive joint 2: %f", q(1));
-                ROS_INFO("repulsive joint 3: %f", q(2));
-                ROS_INFO("repulsive joint 4: %f", q(0));
-                ROS_INFO("repulsive joint 5: %f", q(1));
-                ROS_INFO("repulsive joint 6: %f", q(2));
-                ROS_INFO("\r");
+                //ROS_INFO("repulsive joint 1: %f", q(0));
+                //ROS_INFO("repulsive joint 2: %f", q(1));
+                //ROS_INFO("repulsive joint 3: %f", q(2));
+                //ROS_INFO("repulsive joint 4: %f", q(0));
+                //ROS_INFO("repulsive joint 5: %f", q(1));
+                //ROS_INFO("repulsive joint 6: %f", q(2));
+                //ROS_INFO("\r");
                 
-                ROS_INFO("attractive joint 1: %f", q_dot_cmd_(0));
-                ROS_INFO("attractive joint 2: %f", q_dot_cmd_(1));
-                ROS_INFO("attractive joint 3: %f", q_dot_cmd_(2));
-                ROS_INFO("attractive joint 4: %f", q_dot_cmd_(0));
-                ROS_INFO("attractive joint 5: %f", q_dot_cmd_(1));
-                ROS_INFO("attractive joint 6: %f", q_dot_cmd_(2));
+                //ROS_INFO("attractive joint 1: %f", q_dot_cmd_(0));
+                //ROS_INFO("attractive joint 2: %f", q_dot_cmd_(1));
+                //ROS_INFO("attractive joint 3: %f", q_dot_cmd_(2));
+                //ROS_INFO("attractive joint 4: %f", q_dot_cmd_(0));
+                //ROS_INFO("attractive joint 5: %f", q_dot_cmd_(1));
+                //ROS_INFO("attractive joint 6: %f", q_dot_cmd_(2));
 
                 
                 print_state = 0;
@@ -297,17 +437,60 @@ class trajectory_planner {
             twist_msgs_.angular.y = q_dot_cmd_(4);
             twist_msgs_.angular.z = q_dot_cmd_(5);
 
-            vel_pub_.publish(twist_msgs_);
+            ////
+
+            
+
+            ex_temp_ = diff(xee_, xdes_);
+
+            ex_.data[0] = ex_temp_(0);
+            ex_.data[1] = ex_temp_(1);
+            ex_.data[2] = ex_temp_(2);
+            ex_.data[3] = ex_temp_(3);
+            ex_.data[4] = ex_temp_(4);
+            ex_.data[5] = ex_temp_(5);
+
+            ex_dot_.data = xdes_dot_.data - xee_dot_.data;
+            ex_int_.data = ex_int_.data + ex_.data * dt;
+
+            y_.data =  J_inv_.data * (xdes_ddot_.data + Kp_ws_.data.cwiseProduct(ex_.data) + Kd_ws_.data.cwiseProduct(ex_dot_.data));// + Ki_ws_.data.cwiseProduct(ex_int_.data));
+            //dance_mode();
+            joint_cmds_.data.clear();
+
+            for(int i = 0; i< n_joints_ ; i++){
+                joint_cmds_.data.push_back(y_(i));
+            }
+
+
+            vel_pub_.publish(joint_cmds_);
             publish_err();
         }
 
+        void dance_mode(){
+            t = time;
+            for(int i = 0; i < n_joints_; i+=4){
+                qdes_.data[i] = 45 * D2R * sin(M_PI / 2* t);
+                qdes_dot_.data[i] = 45 * D2R * M_PI/2 * cos(M_PI /2 * t);
+                qd_ddot.data[i] = -45 * D2R * M_PI/2 * M_PI/2 * sin(M_PI / 2 * t);
+            }
+
+
+            e_.data = qdes_.data - q_.data;
+            e_dot_.data = qdes_dot_.data - q_dot_.data; // error for the joint velocity from wanted speed and joint speed
+            e_int_.data = e_int_.data + e_.data * dt;
+
+
+            y_.data = qdes_ddot_.data + Kd_.data.cwiseProduct(e_dot_.data) + Kp_.data.cwiseProduct(e_.data) + Ki_.data.cwiseProduct(e_int_.data);
+        }
+
+
         void publish_err() {
-            twist_err_msgs_.linear.x = Xerr_(0);
-            twist_err_msgs_.linear.y = Xerr_(1);
-            twist_err_msgs_.linear.z = Xerr_(2);
-            twist_err_msgs_.angular.x = Xerr_(3);
-            twist_err_msgs_.angular.y = Xerr_(4);
-            twist_err_msgs_.angular.z = Xerr_(5);
+            twist_err_msgs_.linear.x = ex_temp_(0);
+            twist_err_msgs_.linear.y = ex_temp_(1);
+            twist_err_msgs_.linear.z = ex_temp_(2);
+            twist_err_msgs_.angular.x = ex_temp_(3);
+            twist_err_msgs_.angular.y = ex_temp_(4);
+            twist_err_msgs_.angular.z = ex_temp_(5);
             
             twist_error_pub_.publish(twist_err_msgs_);
         }
@@ -323,7 +506,7 @@ class trajectory_planner {
                     min_dist = dist;
                     min_obs_point = i;
                 }
-            }
+            } 
             float q = 0.25; 
             KDL::JntArray p;
             p.data = Eigen::VectorXd::Zero(n_joints_);
@@ -420,8 +603,10 @@ class trajectory_planner {
         KDL::Twist Vcmd_;
         boost::scoped_ptr<KDL::ChainFkSolverPos_recursive> fk_pos_solver_;
         boost::scoped_ptr<KDL::ChainJntToJacSolver> jnt_to_jac_solver_; // solver for jacobian
+        //boost::scoped_ptr<KDL::ChainJntToJacDotSolver> jnt_to_jac_dot_solver_;
         boost::scoped_ptr<KDL::TreeJntToJacSolver> TreeJntToJacSolver_;
         ros::Subscriber pose_subs_;
+        ros::Subscriber des_subs;
         ros::Subscriber target_pose_subs_;
         ros::Publisher vel_pub_;
         ros::Publisher twist_error_pub_;
@@ -433,7 +618,7 @@ class trajectory_planner {
         std::vector<std::string> joint_names_;
         unsigned int n_joints_;
         command_msgs::planGoal goal;
-        KDL::JntArray q_, qd_set_, qd_, qd_dot, qd_ddot, q_dot_cmd_, Vcmd_jnt_;
+        KDL::JntArray q_, q_dot_, qd_set_, qd_, qd_dot, qd_ddot, q_dot_cmd_, Vcmd_jnt_;
         double t = 0.0;
         KDL::Chain kdl_chain_; // chain of the kinematic tree
         KDL::Tree kdl_tree_;   // kinematic tree based of the model urdf downloaded from the parameter server
@@ -445,9 +630,34 @@ class trajectory_planner {
         KDL::Jacobian J_inv_;
         KDL::Jacobian J_trans_;
         KDL::Jacobian J_temp_;
+        std_msgs::Float64MultiArray joint_cmds_;
         geometry_msgs::Twist twist_msgs_;
         geometry_msgs::Twist twist_err_msgs_;
         std::vector<KDL::Vector> obs_points_;
+        KDL::JntArray qdes_, qdes_dot_, qdes_ddot_;
+
+        //Mine
+        double time;
+        double dt;
+
+        KDL::JntArray Kp_, Ki_, Kd_;
+        KDL::JntArray Kp_ws_, Ki_ws_, Kd_ws_;
+        KDL::JntArray y_;
+        KDL::JntArray e_, e_dot_, e_int_;
+
+        KDL::Frame xdes_; // x.p: frame position(3x1), x.m: frame orientation (3x3)
+        KDL::Frame xee_;
+
+        // KDL::Twist xd_dot_, xd_ddot_;
+        KDL::JntArray ex_;
+        KDL::JntArray xdes_dot_, xdes_ddot_;
+        KDL::JntArray xee_dot_;
+        KDL::JntArray ex_dot_, ex_int_;
+        
+        KDL::Twist ex_temp_;
+
+        //KDL::Twist jac_dot_;
+
 };
 
 };
