@@ -207,6 +207,7 @@ class trajectory_planner {
 
             ///
 
+            ROS_INFO("Number of joints = %d ", kdl_chain_.getNrOfJoints());
             J_.resize(kdl_chain_.getNrOfJoints());
             J2_.resize(6);
             J3_.resize(6);
@@ -215,6 +216,7 @@ class trajectory_planner {
             J6_.resize(6);
 
             J_inv_.resize(kdl_chain_.getNrOfJoints());
+            J_dot_.resize(kdl_chain_.getNrOfJoints());
             J_temp_.resize(kdl_chain_.getNrOfJoints());
             J_trans_.resize(kdl_chain_.getNrOfJoints());
             Vcmd_jnt_.data = Eigen::VectorXd::Zero(n_joints_);
@@ -223,7 +225,7 @@ class trajectory_planner {
             jnt_to_jac_solver_.reset(new KDL::ChainJntToJacSolver(kdl_chain_));
         
             TreeJntToJacSolver_.reset(new KDL::TreeJntToJacSolver(kdl_tree_));
-            //jnt_to_jac_dot_solver_.reset(new KDL::ChainJntToJacDotSolver(kdl_chain_));
+            jnt_to_jac_dot_solver_.reset(new KDL::ChainJntToJacDotSolver(kdl_chain_));
             init_pose();
             init_obs();
             return true;
@@ -333,7 +335,9 @@ class trajectory_planner {
             //J_temp_.data = J_trans_.data * J_temp_.data.inverse();
             J_inv_.data = J_.data.inverse();// * fmin(1, (1-(0.005 - abs(det))/0.004)) + J_temp_.data * fmax(0, (0.005 - abs(det))/0.004); 
         }
-        //jnt_to_jac_dot_solver_.JntToJacDot(q_, jac_dot_, -1);
+
+        q_dot_jntArry = KDL::JntArrayVel(q_, q_dot_);
+        jnt_to_jac_dot_solver_->JntToJacDot(q_dot_jntArry, J_dot_);
         calc_diff();
         
         }
@@ -453,7 +457,7 @@ class trajectory_planner {
             ex_dot_.data = xdes_dot_.data - xee_dot_.data;
             ex_int_.data = ex_int_.data + ex_.data * dt;
 
-            y_.data =  J_inv_.data * (xdes_ddot_.data + Kp_ws_.data.cwiseProduct(ex_.data) + Kd_ws_.data.cwiseProduct(ex_dot_.data));// + Ki_ws_.data.cwiseProduct(ex_int_.data));
+            y_.data =  J_inv_.data * (xdes_ddot_.data + Kp_ws_.data.cwiseProduct(ex_.data) + Kd_ws_.data.cwiseProduct(ex_dot_.data) + J_dot_.data * q_dot_.data);// + Ki_ws_.data.cwiseProduct(ex_int_.data));
             //dance_mode();
             joint_cmds_.data.clear();
 
@@ -603,7 +607,7 @@ class trajectory_planner {
         KDL::Twist Vcmd_;
         boost::scoped_ptr<KDL::ChainFkSolverPos_recursive> fk_pos_solver_;
         boost::scoped_ptr<KDL::ChainJntToJacSolver> jnt_to_jac_solver_; // solver for jacobian
-        //boost::scoped_ptr<KDL::ChainJntToJacDotSolver> jnt_to_jac_dot_solver_;
+        boost::scoped_ptr<KDL::ChainJntToJacDotSolver> jnt_to_jac_dot_solver_;
         boost::scoped_ptr<KDL::TreeJntToJacSolver> TreeJntToJacSolver_;
         ros::Subscriber pose_subs_;
         ros::Subscriber des_subs;
@@ -656,7 +660,8 @@ class trajectory_planner {
         
         KDL::Twist ex_temp_;
 
-        //KDL::Twist jac_dot_;
+        KDL::Jacobian J_dot_;
+        KDL::JntArrayVel q_dot_jntArry;
 
 };
 

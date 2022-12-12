@@ -15,6 +15,13 @@
       - computed_torque_clik_controller -->
   <rosparam file="$(find elfin_gazebo)/config/$(arg controller).yaml" command="load"/>
 
+  <!-- Workpiece Model -->
+  <group ns="box_circle">
+    <param name="robot_description" command="$(find xacro)/xacro --inorder '$(find elfin_description)/urdf/my_box.urdf.xacro'" />
+      
+    <node name="urdf_spawner2" pkg="gazebo_ros" type="spawn_model" respawn="false" output="screen" args="-urdf -model box -param robot_description"/> 
+  </group>
+
   <node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="false"
       output="screen" ns="/elfin" args="joint_state_controller $(arg controller)"/>
 

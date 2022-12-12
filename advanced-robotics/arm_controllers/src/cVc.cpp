@@ -16,6 +16,8 @@
 #include <pluginlib/class_list_macros.h>
 #include <std_msgs/Float64MultiArray.h>
 #include <geometry_msgs/Twist.h>
+#include <geometry_msgs/WrenchStamped.h>
+#include <geometry_msgs/Point.h>
 #include <vector>
 #include <urdf/model.h>
 
@@ -52,6 +54,75 @@
 
 namespace arm_controllers
 {
+class MovingAverage
+{
+public:
+  MovingAverage(){
+  filterLength = 5;
+  this->filterLength = filterLength;
+  this->filterPointer = new double[filterLength];
+  this->lastValue = 0.0;
+  initFilter();
+}
+  void Init(int filterLength){
+  this->filterLength = filterLength;
+  this->filterPointer = new double[filterLength];
+  this->lastValue = 0.0;
+  initFilter();
+}
+  double addSample(double newValue)
+{
+  shiftFilter(newValue);
+  computeAverage();
+  return this->lastValue;
+}
+  double getValue()
+{
+  return this->lastValue;
+}
+  void dumpFilter()
+{
+  this->lastValue = 0.0;
+  initFilter();
+}
+
+private:
+  double *filterPointer;
+  int filterLength;
+  double lastValue;
+
+  void initFilter()
+{
+  for (int i = 0; i < this->filterLength; i++)
+  {
+    *(filterPointer + i) = 0.0;
+  }
+}
+  void shiftFilter(double nextValue)
+{
+  for (int i = this->filterLength - 1; i > -1; i--)
+  {
+    if (i == 0)
+    {
+      *(filterPointer) = nextValue;
+    }
+    else
+    {
+      *(filterPointer + i) = *(filterPointer + (i - 1));
+    }
+  }
+}
+  void computeAverage()
+{
+  double sum = 0.0;
+  for (int i = 0; i < this->filterLength; i++)
+  {
+    sum += *(filterPointer + i);
+  }
+  this->lastValue = sum / this->filterLength;
+}
+};
+
 class cVc : public controller_interface::Controller<hardware_interface::EffortJointInterface>
 {
   public:
@@ -65,7 +136,7 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
             ROS_ERROR("Could not find joint name");
             return false;
         }
-        n_joints_ = joint_names_.size();
+        n_joints_ = joint_names_.size() - 1;
 
         if (n_joints_ == 0)
         {
@@ -258,11 +329,19 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
         pub_qd_ = n.advertise<std_msgs::Float64MultiArray>("qd", 1000);
         pub_q_ = n.advertise<std_msgs::Float64MultiArray>("q", 1000);
         pub_e_ = n.advertise<std_msgs::Float64MultiArray>("e", 1000);
+        pub_pose_ee = n.advertise<geometry_msgs::Point>("ee_point", 1000);
 
         pub_SaveData_ = n.advertise<std_msgs::Float64MultiArray>("SaveData", 1000); // 뒤에 숫자는?
-
+        pub_sensor_filtered = n.advertise<geometry_msgs::Wrench>("sensor_filtered", 1000); // 뒤에 숫자는?
+        
         vel_cmd_ = n.subscribe("command/test", 1000, &cVc::command_vel_callback, this);
-
+        sub_sensor_raw = n.subscribe("/elfin/ft_sensor_topic", 1000, &cVc::sensor_callback, this);
+        filter_f_x.Init(20);
+        filter_f_y.Init(20);
+        filter_f_z.Init(20);
+        filter_t_x.Init(20);
+        filter_t_y.Init(20);
+        filter_t_z.Init(20);
         // 6.2 action server
         return true;
     }
@@ -276,6 +355,16 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
         }
     }
 
+    void sensor_callback(const geometry_msgs::WrenchStampedConstPtr &msg) {
+        geometry_msgs::Wrench msg2;
+        msg2.force.x = filter_f_x.addSample(abs(msg->wrench.force.x));
+        msg2.force.y = filter_f_y.addSample(abs(msg->wrench.force.y));
+        msg2.force.z = filter_f_z.addSample(msg->wrench.force.z);
+        msg2.torque.x = filter_t_x.addSample(msg->wrench.torque.x);
+        msg2.torque.y = filter_t_y.addSample(msg->wrench.torque.y);
+        msg2.torque.z = filter_t_z.addSample(msg->wrench.torque.z);
+        pub_sensor_filtered.publish(msg2); 
+    }
     void command_vel_callback(const std_msgs::Float64MultiArrayConstPtr &msg) {
         for(int i = 0; i < n_joints_; i++){
             y_(i) = msg->data[i];
@@ -327,6 +416,11 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
         {
             joints_[i].setCommand(tau_d_(i)); 
         }
+
+        fk_pos_solver_->JntToCart(q_, xee_); // end effector poss 
+        msg_ee_point.x = xee_.p.x();
+        msg_ee_point.y = xee_.p.y();
+        msg_ee_point.z = xee_.p.z();
 
         //print_state();
         save_data();
@@ -440,7 +534,7 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
         pub_qd_.publish(msg_qd_);
         pub_q_.publish(msg_q_);
         pub_e_.publish(msg_e_);
-
+        pub_pose_ee.publish(msg_ee_point);
         pub_SaveData_.publish(msg_SaveData_);
     }
 
@@ -537,6 +631,7 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
     // frames
     KDL::Frame x_; // end effector frame
     KDL::Frame xd_; // end effector desired frame
+    KDL::Frame xee_;
     
     // twists
     KDL::Twist Xerr_;
@@ -552,16 +647,20 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
     // ros publisher
     ros::Publisher pub_qd_, pub_q_, pub_e_;
     ros::Publisher pub_SaveData_;
+    ros::Publisher pub_sensor_filtered; 
+    ros::Publisher pub_pose_ee; 
     
     ros::Subscriber vel_cmd_;
+    ros::Subscriber sub_sensor_raw;
 
     // ros message
     std_msgs::Float64MultiArray msg_qd_, msg_q_, msg_e_;
     std_msgs::Float64MultiArray msg_SaveData_;
-
+    geometry_msgs::Point msg_ee_point;
     // params for using different controller types and calculations
     bool task_space;
     bool frame_error_;
+    MovingAverage filter_f_x, filter_f_y, filter_f_z, filter_t_x, filter_t_y, filter_t_z;
 
     float t_ = 1.0;
 };

@@ -10,6 +10,18 @@
     </plugin>
   </gazebo>
   
+  <gazebo reference="ft_sensor_joint">
+   <provideFeedback>true</provideFeedback>
+  </gazebo>
+
+  <gazebo>
+    <plugin name="ft_sensor" filename="libgazebo_ros_ft_sensor.so">
+    <updateRate>200</updateRate>
+    <topicName>elfin/ft_sensor_topic</topicName>
+    <jointName>ft_sensor_joint</jointName>
+    </plugin>
+  </gazebo> 
+
   <gazebo reference="elfin_link2">
     <visual name='visual'>
      <material>
@@ -32,4 +44,14 @@
     </visual>
   </gazebo>
   
+  <gazebo reference="elfin_tool_ball">
+    <visual name='visual'>
+     <material>
+       <script>
+         <uri>file://media/materials/scripts/gazebo.material</uri>
+         <name>Gazebo/Grey</name>
+       </script>
+     </material>
+    </visual>
+  </gazebo>  
 </robot>
