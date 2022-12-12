@@ -329,7 +329,7 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
         pub_qd_ = n.advertise<std_msgs::Float64MultiArray>("qd", 1000);
         pub_q_ = n.advertise<std_msgs::Float64MultiArray>("q", 1000);
         pub_e_ = n.advertise<std_msgs::Float64MultiArray>("e", 1000);
-        pub_pose_ee = n.advertise<geometry_msgs::Point>("ee_point", 1000);
+        pub_pose_ee = n.advertise<std_msgs::Float64MultiArray>("ee_point", 1000);
 
         pub_SaveData_ = n.advertise<std_msgs::Float64MultiArray>("SaveData", 1000); // 뒤에 숫자는?
         pub_sensor_filtered = n.advertise<geometry_msgs::Wrench>("sensor_filtered", 1000); // 뒤에 숫자는?
@@ -357,8 +357,8 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
 
     void sensor_callback(const geometry_msgs::WrenchStampedConstPtr &msg) {
         geometry_msgs::Wrench msg2;
-        msg2.force.x = filter_f_x.addSample(abs(msg->wrench.force.x));
-        msg2.force.y = filter_f_y.addSample(abs(msg->wrench.force.y));
+        msg2.force.x = filter_f_x.addSample((msg->wrench.force.x));
+        msg2.force.y = filter_f_y.addSample((msg->wrench.force.y));
         msg2.force.z = filter_f_z.addSample(msg->wrench.force.z);
         msg2.torque.x = filter_t_x.addSample(msg->wrench.torque.x);
         msg2.torque.y = filter_t_y.addSample(msg->wrench.torque.y);
@@ -418,9 +418,15 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
         }
 
         fk_pos_solver_->JntToCart(q_, xee_); // end effector poss 
-        msg_ee_point.x = xee_.p.x();
-        msg_ee_point.y = xee_.p.y();
-        msg_ee_point.z = xee_.p.z();
+        msg_ee_point.data.clear();
+        msg_ee_point.data.push_back(xee_.p.x());
+        msg_ee_point.data.push_back(xee_.p.y());
+        msg_ee_point.data.push_back(xee_.p.z());
+        double alpha, beta, gama;
+        xee_.M.GetEulerZYX(alpha, beta, gama);
+        msg_ee_point.data.push_back(alpha);
+        msg_ee_point.data.push_back(beta);
+        msg_ee_point.data.push_back(gama);
 
         //print_state();
         save_data();
@@ -656,7 +662,8 @@ class cVc : public controller_interface::Controller<hardware_interface::EffortJo
     // ros message
     std_msgs::Float64MultiArray msg_qd_, msg_q_, msg_e_;
     std_msgs::Float64MultiArray msg_SaveData_;
-    geometry_msgs::Point msg_ee_point;
+    std_msgs::Float64MultiArray msg_ee_point;
+    //geometry_msgs::Point msg_ee_point;
     // params for using different controller types and calculations
     bool task_space;
     bool frame_error_;

@@ -37,6 +37,10 @@ elfin:
         elfin_joint7: 
           pid: {p: 1000.0, i: 30, d: 50.0}
           pid_ws: {p: 500.0, i: 30, d: 120.0}
+        comp_cof: 
+          M_t: {mt_1: 10, mt_2: 10, mt_3: 10, mt_4: 10, mt_5: 10, mt_6: 10}
+          K_Dt: {kdt_1: 5, kdt_2: 5, kdt_3: 5, kdt_4: 5, kdt_5: 5, kdt_6: 5}
+          K_Pt: {kpt_1: 10, kpt_2: 10, kpt_3: 10, kpt_4: 10, kpt_5: 10, kpt_6: 10}
       root_link: world
       tip_link: elfin_tool_ball
       Joint_space: false # define if the command calculations are done in the joint space or in task space

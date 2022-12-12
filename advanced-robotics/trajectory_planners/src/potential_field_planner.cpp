@@ -6,6 +6,7 @@
 #include <std_msgs/Float64MultiArray.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/Twist.h>
+#include <geometry_msgs/WrenchStamped.h>
 #include <urdf/model.h>
 #include <bits/stdc++.h>
 // from kdl packages
@@ -19,6 +20,8 @@
 #include <kdl/treejnttojacsolver.hpp>
 #include <kdl/chainfksolverpos_recursive.hpp>
 #include <kdl/chainiksolvervel_pinv.hpp>
+#include <kdl/treefksolver.hpp>
+//#include <kdl/treefksolverpose.hpp>
 #include <kdl/chainjnttojacdotsolver.hpp>
 
 #include <Eigen/Core>
@@ -46,7 +49,9 @@ class trajectory_planner {
             pose_subs_ = n.subscribe<std_msgs::Float64MultiArray>("elfin/cvc/q", 1000, &trajectory_planner::pose_callback, this);
             des_subs = n.subscribe<std_msgs::Float64MultiArray>("/planner/des_frame", 1000, &trajectory_planner::des_callback, this);
             target_pose_subs_ = n.subscribe<geometry_msgs::TransformStamped>("target_pose", 1000, &trajectory_planner::target_pose_callback, this);
+            sensor_filtered = n.subscribe<geometry_msgs::Wrench>("/elfin/cvc/sensor_filtered", 1000, &trajectory_planner::sensor_filtered_callback, this);
             twist_error_pub_ = n.advertise<geometry_msgs::Twist>("Xerr_", 1000);
+            ee_wrench_in_world = n.advertise<geometry_msgs::Wrench>("ee_wrench_world", 1000);
             vel_pub_ = n.advertise<std_msgs::Float64MultiArray>("/elfin/cvc/command/test", 1000);
 
             n_joints_ = 6;
@@ -131,7 +136,44 @@ class trajectory_planner {
             Kd_ws_.resize(n_joints_);
             Ki_ws_.resize(n_joints_);
 
-            std::vector<double> Kp(n_joints_), Ki(n_joints_), Kd(n_joints_);
+            M_t_.resize(6);
+            K_Dt_.resize(6);
+            K_Pt_.resize(6);
+
+            std::vector<double> Kp(n_joints_), Ki(n_joints_), Kd(n_joints_), Mt(6), KDt(6), KPt(6);
+            for (size_t i = 0; i < 3; i++){
+                std::string si = boost::lexical_cast<std::string>(i + 1);
+                if (n.getParam("/elfin/cvc/gains/comp_cof/M_t/mt_" +si, Mt[i]))
+                {
+                    M_t_(i) = Mt[i];
+                }
+                else
+                {
+                    ROS_ERROR("Cannot find M_t gain");
+                    return false;
+                }
+
+                if (n.getParam("/elfin/cvc/gains/comp_cof/K_Dt/kdt_" + si , KDt[i]))
+                {
+                    K_Dt_(i) = KDt[i];
+                }
+                else
+                {
+                    ROS_ERROR("Cannot find K_Dt gain");
+                    return false;
+                }
+
+                if (n.getParam("/elfin/cvc/gains/comp_cof/K_Pt/kpt_" + si, KPt[i]))
+                {
+                    K_Pt_(i) = KPt[i];
+                }
+                else
+                {
+                    ROS_ERROR("Cannot find K_Pt gain");
+                    return false;
+                }
+
+            }
             for (size_t i = 0; i < n_joints_; i++)
             {
                 std::string si = boost::lexical_cast<std::string>(i + 1);
@@ -222,12 +264,14 @@ class trajectory_planner {
             Vcmd_jnt_.data = Eigen::VectorXd::Zero(n_joints_);
             q_dot_cmd_.data = Eigen::VectorXd::Zero(n_joints_);
             fk_pos_solver_.reset(new KDL::ChainFkSolverPos_recursive(kdl_chain_));
+            //fk_pos_solver_pose_.reset(new KDL::TreeFkSolverPos(kdl_tree_));
             jnt_to_jac_solver_.reset(new KDL::ChainJntToJacSolver(kdl_chain_));
         
             TreeJntToJacSolver_.reset(new KDL::TreeJntToJacSolver(kdl_tree_));
             jnt_to_jac_dot_solver_.reset(new KDL::ChainJntToJacDotSolver(kdl_chain_));
             init_pose();
             init_obs();
+            init_imp();
             return true;
             }
 
@@ -245,6 +289,14 @@ class trajectory_planner {
             obs_points_.push_back(obs_point);
             obs_point(2) = 0.8; //z
             obs_points_.push_back(obs_point);
+        }
+        void init_imp(){
+            z_imp_dot_.data = Eigen::VectorXd::Zero(n_joints_);
+            z_imp_ddot.data = Eigen::VectorXd::Zero(n_joints_);
+            z_imp_.p(0) = 0;
+            z_imp_.p(1) = 0;
+            z_imp_.p(2) = 0;
+            z_imp_.M = KDL::Rotation::Identity();
         }
 
         // initial pose for robot to match
@@ -342,6 +394,46 @@ class trajectory_planner {
         
         }
 
+        void sensor_filtered_callback(const geometry_msgs::WrenchConstPtr &msg) {
+            // make a tag frame 
+            KDL::Wrench temp1;
+            temp1.force.x(1);
+            temp1.force.y(1);
+            temp1.force.z(1);
+            temp1.torque.x(1);
+            temp1.torque.y(1);
+            temp1.torque.z(1);
+            KDL::Wrench temp = x_3_.M * temp1;
+            
+
+            //if(he_ != KDL::Wrench::Zero() && ((temp.force - he_.force).Norm() < 1.2*temp.force.Norm())){
+            he_ = temp;
+            //}
+
+            //double alpha, beta, gama;
+            //xee_.M.GetEulerZYX(alpha, beta, gama);
+            //ROS_INFO("current frame x %f, %f, %f", alpha, beta, gama);
+            //ROS_INFO("forces are: %f , %f, %f", he_.force.x(), he_.force.y(), he_.force.z());
+            //ROS_INFO("forces2 are: %f , %f, %f", msg->force.x, msg->force.y, msg->force.z);
+            //if (he_.force.x() < 0){
+
+            //            ROS_WARN("current frame x %f, %f, %f", alpha, beta, gama);
+            //            ROS_WARN("forces are: %f , %f, %f", he_.force.x(), he_.force.y(), he_.force.z());
+            //            ROS_WARN("forces2 are: %f , %f, %f", msg->force.x, msg->force.y, msg->force.z);
+            //}
+            geometry_msgs::Wrench msg2;
+            msg2.force.x = he_.force.x();
+            msg2.force.x = he_.force.x();
+            msg2.force.y = he_.force.y();
+            msg2.torque.z = he_.torque.z();
+            msg2.torque.y = he_.torque.y();
+            msg2.torque.z = he_.torque.z();
+            ee_wrench_in_world.publish(msg2);
+
+
+            //xd_ = x_ * xd_; // frame from ee-tag to world-tag
+            //xd_.M.DoRotX(PI/2); // rotate target frame to be in same orientation as end effector according to ENU
+        }
         void target_pose_callback(const geometry_msgs::TransformStampedConstPtr &msg) {
             // make a tag frame 
             xd_.M = xd_.M.Quaternion(msg->transform.rotation.x, msg->transform.rotation.y, msg->transform.rotation.z, msg->transform.rotation.w);
@@ -401,10 +493,6 @@ class trajectory_planner {
                 //ROS_INFO("target frame x %f", xd_.p(0));
                 //ROS_INFO("target frame y %f", xd_.p(1));
                 //ROS_INFO("target frame z %f", xd_.p(2));
-                
-                //ROS_INFO("current frame x %f", x_.p(0));
-                //ROS_INFO("current frame y %f", x_.p(1));
-                //ROS_INFO("current frame z %f", x_.p(2));
 
                 //ROS_INFO("\r");
 
@@ -442,23 +530,11 @@ class trajectory_planner {
             twist_msgs_.angular.z = q_dot_cmd_(5);
 
             ////
+            y_ = WS_controller(xdes_, xdes_dot_, xdes_ddot_);
+            //dance_mode();
 
             
 
-            ex_temp_ = diff(xee_, xdes_);
-
-            ex_.data[0] = ex_temp_(0);
-            ex_.data[1] = ex_temp_(1);
-            ex_.data[2] = ex_temp_(2);
-            ex_.data[3] = ex_temp_(3);
-            ex_.data[4] = ex_temp_(4);
-            ex_.data[5] = ex_temp_(5);
-
-            ex_dot_.data = xdes_dot_.data - xee_dot_.data;
-            ex_int_.data = ex_int_.data + ex_.data * dt;
-
-            y_.data =  J_inv_.data * (xdes_ddot_.data + Kp_ws_.data.cwiseProduct(ex_.data) + Kd_ws_.data.cwiseProduct(ex_dot_.data) + J_dot_.data * q_dot_.data);// + Ki_ws_.data.cwiseProduct(ex_int_.data));
-            //dance_mode();
             joint_cmds_.data.clear();
 
             for(int i = 0; i< n_joints_ ; i++){
@@ -486,7 +562,63 @@ class trajectory_planner {
 
             y_.data = qdes_ddot_.data + Kd_.data.cwiseProduct(e_dot_.data) + Kp_.data.cwiseProduct(e_.data) + Ki_.data.cwiseProduct(e_int_.data);
         }
+        KDL::JntArray WS_controller(KDL::Frame xdes_temp_, KDL::JntArray xdes_dot_temp_, KDL::JntArray xdes_ddot_temp_){
 
+            KDL::Twist ex_temp_local_ = diff(xee_, xdes_temp_);
+            KDL::JntArray ex_local_;
+            KDL::JntArray ex_dot_local_;
+            KDL::JntArray ex_int_local_;
+            KDL::JntArray y_local_;
+            ex_local_.data = Eigen::VectorXd::Zero(n_joints_);
+            ex_dot_local_.data = Eigen::VectorXd::Zero(n_joints_);
+            ex_int_local_.data = Eigen::VectorXd::Zero(n_joints_);
+            y_local_.data = Eigen::VectorXd::Zero(n_joints_);
+
+            ex_local_.data[0] = ex_temp_local_(0);
+            ex_local_.data[1] = ex_temp_local_(1);
+            ex_local_.data[2] = ex_temp_local_(2);
+            ex_local_.data[3] = ex_temp_local_(3);
+            ex_local_.data[4] = ex_temp_local_(4);
+            ex_local_.data[5] = ex_temp_local_(5);
+
+            ex_dot_local_.data = xdes_dot_temp_.data - xee_dot_.data;
+            ex_int_.data = ex_int_.data + ex_local_.data * dt;
+
+            y_local_.data =  J_inv_.data * (xdes_ddot_temp_.data + Kp_ws_.data.cwiseProduct(ex_local_.data) + Kd_ws_.data.cwiseProduct(ex_dot_local_.data) + J_dot_.data * q_dot_.data);// + Ki_ws_.data.cwiseProduct(ex_int_local_.data));
+            //dance_mode();
+            return y_local_;
+
+
+        }
+
+        KDL::JntArray Impedance_conterller(KDL::Frame xdes_temp_, KDL::JntArray xdes_dot_temp_, KDL::JntArray xdes_ddot_temp_){
+
+            KDL::Twist ex_temp_local_ = diff(xee_, xdes_temp_);
+            KDL::JntArray ex_local_;
+            KDL::JntArray ex_dot_local_;
+            KDL::JntArray ex_int_local_;
+            KDL::JntArray y_local_;
+            ex_local_.data = Eigen::VectorXd::Zero(n_joints_);
+            ex_dot_local_.data = Eigen::VectorXd::Zero(n_joints_);
+            ex_int_local_.data = Eigen::VectorXd::Zero(n_joints_);
+            y_local_.data = Eigen::VectorXd::Zero(n_joints_);
+
+            ex_local_.data[0] = ex_temp_local_(0);
+            ex_local_.data[1] = ex_temp_local_(1);
+            ex_local_.data[2] = ex_temp_local_(2);
+            ex_local_.data[3] = ex_temp_local_(3);
+            ex_local_.data[4] = ex_temp_local_(4);
+            ex_local_.data[5] = ex_temp_local_(5);
+
+            ex_dot_local_.data = xdes_dot_temp_.data - xee_dot_.data;
+            ex_int_.data = ex_int_.data + ex_local_.data * dt;
+
+            y_local_.data =  J_inv_.data * (xdes_ddot_temp_.data + Kp_ws_.data.cwiseProduct(ex_local_.data) + Kd_ws_.data.cwiseProduct(ex_dot_local_.data) + J_dot_.data * q_dot_.data);// + Ki_ws_.data.cwiseProduct(ex_int_local_.data));
+            //dance_mode();
+            return y_local_;
+
+
+        }
 
         void publish_err() {
             twist_err_msgs_.linear.x = ex_temp_(0);
@@ -605,6 +737,7 @@ class trajectory_planner {
     private:
         int print_state = 0;
         KDL::Twist Vcmd_;
+        //boost::scoped_ptr<KDL::TreeFKSolverPos> fk_pos_solver_pose_;
         boost::scoped_ptr<KDL::ChainFkSolverPos_recursive> fk_pos_solver_;
         boost::scoped_ptr<KDL::ChainJntToJacSolver> jnt_to_jac_solver_; // solver for jacobian
         boost::scoped_ptr<KDL::ChainJntToJacDotSolver> jnt_to_jac_dot_solver_;
@@ -612,8 +745,10 @@ class trajectory_planner {
         ros::Subscriber pose_subs_;
         ros::Subscriber des_subs;
         ros::Subscriber target_pose_subs_;
+        ros::Subscriber sensor_filtered;
         ros::Publisher vel_pub_;
         ros::Publisher twist_error_pub_;
+        ros::Publisher ee_wrench_in_world;
         KDL::Frame x_, x_2_, x_3_, x_4_, x_5_, x_6_; // end effector frame
         std::vector<KDL::Frame> FK_vec_ {x_, x_2_, x_3_, x_4_, x_5_, x_6_};
 
@@ -646,22 +781,27 @@ class trajectory_planner {
 
         KDL::JntArray Kp_, Ki_, Kd_;
         KDL::JntArray Kp_ws_, Ki_ws_, Kd_ws_;
+        KDL::JntArray M_t_, K_Dt_, K_Pt_;
         KDL::JntArray y_;
         KDL::JntArray e_, e_dot_, e_int_;
 
         KDL::Frame xdes_; // x.p: frame position(3x1), x.m: frame orientation (3x3)
         KDL::Frame xee_;
+        KDL::Frame z_imp_;
 
         // KDL::Twist xd_dot_, xd_ddot_;
         KDL::JntArray ex_;
         KDL::JntArray xdes_dot_, xdes_ddot_;
         KDL::JntArray xee_dot_;
         KDL::JntArray ex_dot_, ex_int_;
+        KDL::JntArray z_imp_dot_;
+        KDL::JntArray z_imp_ddot;
         
         KDL::Twist ex_temp_;
 
         KDL::Jacobian J_dot_;
         KDL::JntArrayVel q_dot_jntArry;
+        KDL::Wrench he_;
 
 };
 
