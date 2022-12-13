@@ -16,7 +16,7 @@ if __name__ == '__main__':
 
     msg_des = Float64MultiArray()
     msg_des.data.clear()
-    msg_des.data.append(-0.38)
+    msg_des.data.append(-0.45)
     msg_des.data.append(0)
     msg_des.data.append(0.56)
     msg_des.data.append(0 * np.pi /180)
@@ -29,8 +29,8 @@ if __name__ == '__main__':
     des_pub.publish(msg_des)
     rospy.sleep(5)
 
-    pa = PyKDL.Vector(-0.38,0,0.56)
-    pb = PyKDL.Vector(-0.38,0.3,0.56)
+    pa = PyKDL.Vector(-0.45,0,0.56)
+    pb = PyKDL.Vector(-0.45,0.3,0.56)
     rot_a = PyKDL.Rotation()
     rot_a.DoRotZ(-90*np.pi/180)
     rot_b = PyKDL.Rotation()

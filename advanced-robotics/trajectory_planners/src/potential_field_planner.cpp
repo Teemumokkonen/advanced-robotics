@@ -139,6 +139,7 @@ class trajectory_planner {
             M_t_.resize(6);
             K_Dt_.resize(6);
             K_Pt_.resize(6);
+            M_t_inv_.resize(6);
 
             std::vector<double> Kp(n_joints_), Ki(n_joints_), Kd(n_joints_), Mt(6), KDt(6), KPt(6);
             for (size_t i = 0; i < 3; i++){
@@ -146,6 +147,7 @@ class trajectory_planner {
                 if (n.getParam("/elfin/cvc/gains/comp_cof/M_t/mt_" +si, Mt[i]))
                 {
                     M_t_(i) = Mt[i];
+                    M_t_inv_(i) = 1/Mt[i];
                 }
                 else
                 {
@@ -292,7 +294,7 @@ class trajectory_planner {
         }
         void init_imp(){
             z_imp_dot_.data = Eigen::VectorXd::Zero(n_joints_);
-            z_imp_ddot.data = Eigen::VectorXd::Zero(n_joints_);
+            z_imp_ddot_.data = Eigen::VectorXd::Zero(n_joints_);
             z_imp_.p(0) = 0;
             z_imp_.p(1) = 0;
             z_imp_.p(2) = 0;
@@ -530,7 +532,8 @@ class trajectory_planner {
             twist_msgs_.angular.z = q_dot_cmd_(5);
 
             ////
-            y_ = WS_controller(xdes_, xdes_dot_, xdes_ddot_);
+            //y_ = WS_controller(xdes_, xdes_dot_, xdes_ddot_);
+            y_ = Impedance_conterller(xdes_, xdes_dot_, xdes_ddot_);
             //dance_mode();
 
             
@@ -593,7 +596,39 @@ class trajectory_planner {
 
         KDL::JntArray Impedance_conterller(KDL::Frame xdes_temp_, KDL::JntArray xdes_dot_temp_, KDL::JntArray xdes_ddot_temp_){
 
-            KDL::Twist ex_temp_local_ = diff(xee_, xdes_temp_);
+            KDL::JntArray he_vec, z_imp_vec, xdes_dot_temp2;
+            xdes_dot_temp2.data = Eigen::VectorXd::Zero(6);
+            he_vec.data = Eigen::VectorXd::Zero(6);
+            z_imp_vec.data = Eigen::VectorXd::Zero(6);
+            he_vec.data[0] = he_.force.x();
+            he_vec.data[1] = he_.force.y();
+            he_vec.data[2] = he_.force.z();
+            he_vec.data[3] = he_.torque.x();
+            he_vec.data[4] = he_.torque.y();
+            he_vec.data[5] = he_.torque.z();
+
+            z_imp_vec.data[0] = z_imp_.p.x();
+            z_imp_vec.data[1] = z_imp_.p.y();
+            z_imp_vec.data[2] = z_imp_.p.z();
+            double alpha, beta, gama;
+            z_imp_.M.GetEulerZYX(alpha, beta, gama);
+            z_imp_vec.data[3] = alpha;
+            z_imp_vec.data[4] = beta;
+            z_imp_vec.data[5] = gama;
+            
+            z_imp_ddot_.data = M_t_inv_.data.cwiseProduct(he_vec.data - K_Dt_.data.cwiseProduct(z_imp_dot_.data) - K_Pt_.data.cwiseProduct(z_imp_vec.data));
+            z_imp_dot_.data = z_imp_dot_.data + z_imp_ddot_.data * dt;
+            z_imp_vec.data = z_imp_vec.data + z_imp_dot_.data * dt;
+            z_imp_.p.x(z_imp_vec(0));
+            z_imp_.p.y(z_imp_vec(1));
+            z_imp_.p.z(z_imp_vec(2));
+            z_imp_.M = KDL::Rotation::EulerZYX(z_imp_vec(3), z_imp_vec(4), z_imp_vec(5));
+
+            KDL::Frame xdes_temp2_;
+            xdes_temp2_ = xdes_temp_ * z_imp_;
+
+            xdes_dot_temp2.data = z_imp_dot_.data + xdes_ddot_temp_.data;
+            KDL::Twist ex_temp_local_ = diff(xee_, xdes_temp2_);
             KDL::JntArray ex_local_;
             KDL::JntArray ex_dot_local_;
             KDL::JntArray ex_int_local_;
@@ -610,7 +645,7 @@ class trajectory_planner {
             ex_local_.data[4] = ex_temp_local_(4);
             ex_local_.data[5] = ex_temp_local_(5);
 
-            ex_dot_local_.data = xdes_dot_temp_.data - xee_dot_.data;
+            ex_dot_local_.data = xdes_dot_temp2.data - xee_dot_.data;
             ex_int_.data = ex_int_.data + ex_local_.data * dt;
 
             y_local_.data =  J_inv_.data * (xdes_ddot_temp_.data + Kp_ws_.data.cwiseProduct(ex_local_.data) + Kd_ws_.data.cwiseProduct(ex_dot_local_.data) + J_dot_.data * q_dot_.data);// + Ki_ws_.data.cwiseProduct(ex_int_local_.data));
@@ -781,7 +816,7 @@ class trajectory_planner {
 
         KDL::JntArray Kp_, Ki_, Kd_;
         KDL::JntArray Kp_ws_, Ki_ws_, Kd_ws_;
-        KDL::JntArray M_t_, K_Dt_, K_Pt_;
+        KDL::JntArray M_t_, K_Dt_, K_Pt_, M_t_inv_;
         KDL::JntArray y_;
         KDL::JntArray e_, e_dot_, e_int_;
 
@@ -795,7 +830,7 @@ class trajectory_planner {
         KDL::JntArray xee_dot_;
         KDL::JntArray ex_dot_, ex_int_;
         KDL::JntArray z_imp_dot_;
-        KDL::JntArray z_imp_ddot;
+        KDL::JntArray z_imp_ddot_;
         
         KDL::Twist ex_temp_;
 

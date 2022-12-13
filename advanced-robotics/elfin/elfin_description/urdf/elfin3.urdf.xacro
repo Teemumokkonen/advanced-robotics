@@ -479,8 +479,8 @@
       spring="100"
       friction="1" />
     <limit
-      lower="0.01"
-      upper="0.01"
+      lower="0.0"
+      upper="0.0"
       effort="0.0"
       velocity="0.0" />   
   </joint>

@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 from geometry_msgs.msg import Wrench
 from geometry_msgs.msg import Point
+from std_msgs.msg import Float64MultiArray
 
 
 class Visualiser:
@@ -51,8 +52,8 @@ class Visualiser:
                 rospy.loginfo("Point Added!")
 
     def pos_callback(self, msg):
-        self.x = msg.y
-        self.y = msg.z
+        self.x = msg.data[1];
+        self.y = msg.data[2];
 
     def update_plot(self, frame):
         self.ln.set_data(self.x_data, self.y_data)
@@ -64,7 +65,7 @@ rospy.init_node("plotter")
 vis = Visualiser()
 #sub = rospy.Subscriber('/dji_sdk/odometry', Odometry, vis.odom_callback)
 
-pose_sub = rospy.Subscriber("/elfin/cvc/ee_point", Point, callback=vis.pos_callback) 
+pose_sub = rospy.Subscriber("/elfin/cvc/ee_point", Float64MultiArray, callback=vis.pos_callback) 
 force_sub = rospy.Subscriber("/elfin/cvc/sensor_filtered", Wrench, callback=vis.force_callback) 
 ani = FuncAnimation(vis.fig, vis.update_plot, init_func=vis.plot_init)
 plt.show(block=True)
