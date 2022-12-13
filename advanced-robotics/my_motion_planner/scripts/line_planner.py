@@ -16,18 +16,18 @@ if __name__ == '__main__':
 
     msg_des = Float64MultiArray()
     msg_des.data.clear()
-    msg_des.data.append(-0.45)
     msg_des.data.append(0)
+    msg_des.data.append(0.2)
     msg_des.data.append(0.56)
     msg_des.data.append(0 * np.pi /180)
     msg_des.data.append(0)
-    msg_des.data.append(-90 * np.pi/180)
+    msg_des.data.append(0 *90 * np.pi/180)
     for x in range(12):
         msg_des.data.append(0)
     des_pub.publish(msg_des)
     rospy.sleep(1)
     des_pub.publish(msg_des)
-    rospy.sleep(5)
+    rospy.sleep(15)
 
     pa = PyKDL.Vector(-0.45,0,0.56)
     pb = PyKDL.Vector(-0.45,0.3,0.56)
